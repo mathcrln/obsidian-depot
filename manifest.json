@@ -2,8 +2,8 @@
 	"id": "depot",
 	"name": "Depot",
 	"version": "0.1.0",
-	"minAppVersion": "1.0.0",
-	"description": "Upload and consume images and documents to public private S3-compatible storage and read them back through presigned URLs.",
+	"minAppVersion": "1.11.4",
+	"description": "S3-compatible attachment storage with private buckets and persistent references.",
 	"author": "Madinco",
 	"isDesktopOnly": false
 }
