@@ -1,0 +1,12 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"rootDir": "..",
+		"noUncheckedIndexedAccess": false,
+		"types": ["node"],
+		"paths": {
+			"@/*": ["../src/*"]
+		}
+	},
+	"include": [".", "../vitest.config.ts"]
+}

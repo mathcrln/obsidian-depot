@@ -9,35 +9,34 @@
 ## Environment & tooling
 
 - Node.js: use current LTS (Node 18+ recommended).
-- **Package manager: npm** (required for this sample - `package.json` defines npm scripts and dependencies).
-- **Bundler: esbuild** (required for this sample - `esbuild.config.mjs` and build scripts depend on it). Alternative bundlers like Rollup or webpack are acceptable for other projects if they bundle all external dependencies into `main.js`.
+- **Package manager: pnpm** (`packageManager` in `package.json`). `pnpm-workspace.yaml` sets `minimumReleaseAge: 1440`; never lower it.
+- **Bundler: esbuild** (`esbuild.config.mjs`). Everything must be bundled into `main.js`.
+- **Lint: ESLint** with `eslint-plugin-obsidianmd` (`eslint.config.mjs`). **Format: oxfmt** (`.oxfmtrc.json`).
+- **Tests: Vitest**, in `tests/`, mirroring `src/` (see the `testing-approach` skill).
 - Types: `obsidian` type definitions.
-
-**Note**: This sample project has specific technical dependencies on npm and esbuild. If you're creating a plugin from scratch, you can choose different tools, but you'll need to replace the build configuration accordingly.
 
 ### Install
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### Dev (watch)
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ### Production build
 
 ```bash
-npm run build
+pnpm build
 ```
 
 ## Linting
 
-- ESLint is preconfigured with `eslint-plugin-obsidianmd` for Obsidian-specific rules.
-- Run `npm run lint` to lint the project.
-- A GitHub Action automatically lints every commit on all branches.
+- Run `pnpm lint` to lint, `pnpm format` to format, and `pnpm typecheck` to type-check.
+- A GitHub Action runs lint, format check, typecheck, tests, and build on every push and pull request.
 
 ## File & folder conventions
 
@@ -173,11 +172,7 @@ export default class MyPlugin extends Plugin {
 	settings!: MySettings;
 
 	async onload() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<MySettings>,
-		);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<MySettings>);
 		registerCommands(this);
 	}
 }
@@ -240,7 +235,7 @@ async onload() {
 this.registerEvent(
 	this.app.workspace.on('file-open', (f) => {
 		/* ... */
-	}),
+	})
 );
 this.registerDomEvent(activeWindow, 'resize', () => {
 	/* ... */
@@ -248,14 +243,14 @@ this.registerDomEvent(activeWindow, 'resize', () => {
 this.registerInterval(
 	window.setInterval(() => {
 		/* ... */
-	}, 1000),
+	}, 1000)
 );
 ```
 
 ## Troubleshooting
 
 - Plugin doesn't load after build: ensure `main.js` and `manifest.json` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/<plugin-id>/`.
-- Build issues: if `main.js` is missing, run `npm run build` or `npm run dev` to compile your TypeScript source code.
+- Build issues: if `main.js` is missing, run `pnpm build` or `pnpm dev` to compile your TypeScript source code.
 - Commands not appearing: verify `addCommand` runs after `onload` and IDs are unique.
 - Settings not persisting: ensure `loadData`/`saveData` are awaited and you re-render the UI after changes.
 - Mobile-only issues: confirm you're not using desktop-only APIs; check `isDesktopOnly` and adjust.
