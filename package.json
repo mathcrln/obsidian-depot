@@ -1,5 +1,5 @@
 {
-	"name": "obsidian-depot",
+	"name": "depot",
 	"version": "0.1.0",
 	"private": true,
 	"description": "S3-compatible attachment storage with private buckets and persistent references.",

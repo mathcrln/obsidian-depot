@@ -23,4 +23,4 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test:run && pnpm build
 
 ## Security
 
-Please email oss@madinco.com rather than opening a public issue.
+Please email oss@mathcrln.com rather than opening a public issue.
