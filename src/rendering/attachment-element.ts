@@ -11,6 +11,33 @@ export function renderAttachmentsIn(root: HTMLElement, depot: Depot): void {
 		const attachment = depot.attachments.from(anchor.getAttribute('href') ?? '');
 		if (attachment) renderLink(anchor as HTMLAnchorElement, attachment);
 	}
+
+	for (const element of elementsIn(root, 'iframe[src], embed[src], video[src], audio[src], source[src], object[data]')) {
+		const attribute = element instanceof HTMLObjectElement ? 'data' : 'src';
+		const attachment = depot.attachments.from(element.getAttribute(attribute) ?? '');
+		if (attachment) renderSource(element, attribute, attachment);
+	}
+}
+
+export function renderSource(element: HTMLElement, attribute: 'src' | 'data', attachment: Attachment): void {
+	if (element.dataset.depot) return;
+
+	element.dataset.depot = 'loading';
+	element.removeAttribute(attribute);
+	element.addClass('depot-loading');
+
+	attachment.resolve().then(
+		({ url }) => {
+			element.removeClass('depot-loading');
+			element.dataset.depot = 'loaded';
+			element.setAttribute(attribute, url);
+
+			if (element instanceof HTMLSourceElement) {
+				(element.parentElement as HTMLMediaElement | null)?.load?.();
+			}
+		},
+		(error: unknown) => showFailure(element, attachment, error)
+	);
 }
 
 export function renderEmbed(img: HTMLImageElement, attachment: Attachment): void {
@@ -29,6 +56,8 @@ export function renderEmbed(img: HTMLImageElement, attachment: Attachment): void
 				img.replaceWith(createEl(attachment.kind, { attr: { src: url, controls: true }, cls: 'depot-media' }));
 			} else if (attachment.kind === 'image') {
 				img.src = url;
+			} else if (attachment.kind === 'pdf') {
+				img.replaceWith(createEl('iframe', { attr: { src: url }, cls: 'depot-pdf' }));
 			} else {
 				img.replaceWith(createEl('a', { text: attachment.name, href: url, cls: 'depot-link' }));
 			}

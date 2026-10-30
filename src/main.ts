@@ -1,7 +1,8 @@
 import { Plugin } from 'obsidian';
-import { registerCheckConnectionCommand } from '@/commands/check-connection';
+import { registerClearCacheCommand } from '@/commands/clear-cache';
 import { registerUploadCommand } from '@/commands/upload-attachment';
 import { Depot } from '@/depot';
+import { registerLibrary } from '@/library/register-library';
 import { registerPasteAndDrop } from '@/editor/paste-and-drop';
 import { registerLivePreview } from '@/rendering/live-preview';
 import { registerReadingView } from '@/rendering/reading-view';
@@ -15,10 +16,11 @@ export default class DepotPlugin extends Plugin {
 
 		this.addSettingTab(new DepotSettingTab(this));
 		registerUploadCommand(this);
-		registerCheckConnectionCommand(this);
+		registerClearCacheCommand(this);
 		registerPasteAndDrop(this);
 		registerReadingView(this);
 		registerLivePreview(this);
+		registerLibrary(this);
 	}
 
 	onunload() {

@@ -28,7 +28,12 @@ export function registerLivePreview(plugin: DepotPlugin): void {
 		const root = plugin.app.workspace.containerEl;
 
 		render(root);
-		observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'href', 'style'] });
+		observer.observe(root, {
+			subtree: true,
+			childList: true,
+			attributes: true,
+			attributeFilter: ['src', 'href', 'data', 'style'],
+		});
 	});
 
 	plugin.register(() => observer.disconnect());

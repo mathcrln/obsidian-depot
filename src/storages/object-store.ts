@@ -10,10 +10,18 @@ export interface ObjectMetadata {
 	etag?: string;
 }
 
+export interface ObjectSummary {
+	key: string;
+	size: number;
+	lastModified: number;
+	etag?: string;
+}
+
 export interface ObjectStore {
 	put(key: string, bytes: ArrayBuffer, contentType: string): Promise<void>;
 	get(key: string): Promise<StoredObject>;
 	head(key: string): Promise<ObjectMetadata>;
+	list(prefix?: string): AsyncIterable<ObjectSummary>;
 }
 
 export class StorageError extends Error {

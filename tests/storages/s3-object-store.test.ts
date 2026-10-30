@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AwsV4Signer } from 'aws4fetch';
 import type { ProfileSettings } from '@/settings/settings';
-import { AccessDenied, MissingCredentials, ObjectNotFound, StorageUnreachable } from '@/storages/object-store';
+import {
+	AccessDenied,
+	MissingCredentials,
+	ObjectNotFound,
+	StorageUnreachable,
+	type ObjectSummary,
+} from '@/storages/object-store';
 import { S3ObjectStore } from '@/storages/s3-object-store';
 import { FakeHttp } from '../support/fake-http';
 import { FakeSecrets } from '../support/fake-secrets';
@@ -195,6 +201,116 @@ describe('head', () => {
 	});
 });
 
+describe('list', () => {
+	it('lists a path-style bucket', async () => {
+		const { store, http } = GivenStore({ endpoint: 'https://minio.local:9000', forcePathStyle: true });
+		http.respondWith({ status: 200, body: GivenListing([GivenEntry('a.png')]) });
+
+		await WhenListing(store);
+
+		expect(http.requests[0]?.method).toBe('GET');
+		expect(http.requests[0]?.url).toBe('https://minio.local:9000/vault/?list-type=2');
+	});
+
+	it('lists a virtual-hosted bucket', async () => {
+		const { store, http } = GivenStore({ endpoint: 'https://r2.example.com', forcePathStyle: false });
+		http.respondWith({ status: 200, body: GivenListing([]) });
+
+		await WhenListing(store);
+
+		expect(http.requests[0]?.url).toBe('https://vault.r2.example.com/?list-type=2');
+	});
+
+	it('encodes the prefix', async () => {
+		const { store, http } = GivenStore({ forcePathStyle: false });
+		http.respondWith({ status: 200, body: GivenListing([]) });
+
+		await WhenListing(store, 'my dir/é+');
+
+		expect(http.requests[0]?.url).toBe('https://vault.s3.test/?list-type=2&prefix=my%20dir%2F%C3%A9%2B');
+	});
+
+	it('returns the parsed objects', async () => {
+		const { store, http } = GivenStore();
+		http.respondWith({ status: 200, body: GivenListing([GivenEntry('a&amp;b.png', 7)]) });
+
+		const objects = await WhenListing(store);
+
+		expect(objects).toEqual([{ key: 'a&b.png', size: 7, lastModified: Date.parse('2026-01-02T03:04:05.000Z'), etag: 'e' }]);
+	});
+
+	it('follows continuation tokens across pages', async () => {
+		const { store, http } = GivenStore({ forcePathStyle: true });
+		http.on('GET', 'https://s3.test/vault/?list-type=2&prefix=p', {
+			status: 200,
+			body: GivenListing([GivenEntry('p/a.png')], 'tok+/='),
+		});
+		http.on('GET', 'https://s3.test/vault/?list-type=2&prefix=p&continuation-token=tok%2B%2F%3D', {
+			status: 200,
+			body: GivenListing([GivenEntry('p/b.png')]),
+		});
+
+		const objects = await WhenListing(store, 'p');
+
+		expect(objects.map((object) => object.key)).toEqual(['p/a.png', 'p/b.png']);
+		expect(http.requests).toHaveLength(2);
+	});
+
+	it('signs the query string', async () => {
+		const { store, http } = GivenStore({ forcePathStyle: true });
+		http.respondWith({ status: 200, body: GivenListing([]) });
+		const signer = new AwsV4Signer({
+			method: 'GET',
+			url: 'https://s3.test/vault/?prefix=a%2Fb&list-type=2',
+			headers: { 'x-amz-content-sha256': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' },
+			accessKeyId: 'AKIDEXAMPLE',
+			secretAccessKey: 'sk',
+			service: 's3',
+			region: 'us-east-1',
+		});
+
+		await WhenListing(store, 'a/b');
+
+		const expected = await signer.sign();
+		expect(http.requests[0]?.headers['authorization']).toBe(expected.headers.get('Authorization'));
+	});
+
+	it('maps a forbidden listing to AccessDenied', async () => {
+		const { store, http } = GivenStore();
+		http.respondWith({ status: 403 });
+
+		await expect(WhenListing(store)).rejects.toThrow(AccessDenied);
+	});
+
+	it('maps a server error to StorageUnreachable', async () => {
+		const { store, http } = GivenStore();
+		http.respondWith({ status: 500 });
+
+		await expect(WhenListing(store)).rejects.toThrow(StorageUnreachable);
+	});
+
+	it('maps a network failure to StorageUnreachable', async () => {
+		const { store, http } = GivenStore();
+		http.failWith('offline');
+
+		await expect(WhenListing(store)).rejects.toThrow(StorageUnreachable);
+	});
+
+	it('requires credentials', async () => {
+		const { store } = GivenStore({ secrets: {} });
+
+		await expect(WhenListing(store)).rejects.toThrow(MissingCredentials);
+	});
+
+	it('reports a missing bucket as unreachable storage, with the provider code', async () => {
+		const { store, http } = GivenStore();
+		http.respondWith({ status: 404, body: GivenErrorBody('NoSuchBucket') });
+
+		await expect(WhenListing(store)).rejects.toThrow(StorageUnreachable);
+		await expect(WhenListing(store)).rejects.toThrow(/NoSuchBucket/);
+	});
+});
+
 describe('failures', () => {
 	it('maps 404 to ObjectNotFound', async () => {
 		const { store, http } = GivenStore();
@@ -202,6 +318,13 @@ describe('failures', () => {
 
 		await expect(store.get('missing.png')).rejects.toBeInstanceOf(ObjectNotFound);
 		await expect(store.head('missing.png')).rejects.toBeInstanceOf(ObjectNotFound);
+	});
+
+	it('includes the provider error code in the message', async () => {
+		const { store, http } = GivenStore();
+		http.respondWith({ status: 403, body: GivenErrorBody('SignatureDoesNotMatch') });
+
+		await expect(store.get('a.png')).rejects.toThrow(/SignatureDoesNotMatch/);
 	});
 
 	it.each([401, 403])('maps %i to AccessDenied', async (status) => {
@@ -283,6 +406,34 @@ function GivenProfile(overrides: Partial<ProfileSettings> = {}): ProfileSettings
 		forcePathStyle: true,
 		accessKeySecret: 'access',
 		secretKeySecret: 'secret',
+		pathPattern: '{id}',
+		lowercaseNames: true,
+		idStyle: 'content-hash',
+		detectDuplicates: false,
+		aliases: [],
 		...overrides,
 	};
+}
+
+async function WhenListing(store: S3ObjectStore, prefix?: string): Promise<ObjectSummary[]> {
+	const objects: ObjectSummary[] = [];
+	for await (const object of store.list(prefix)) objects.push(object);
+	return objects;
+}
+
+function GivenEntry(key: string, size = 1): string {
+	return `<Contents><Key>${key}</Key><LastModified>2026-01-02T03:04:05.000Z</LastModified><ETag>&quot;e&quot;</ETag><Size>${size}</Size></Contents>`;
+}
+
+function GivenListing(entries: string[], nextToken?: string): ArrayBuffer {
+	const paging = nextToken
+		? `<IsTruncated>true</IsTruncated><NextContinuationToken>${nextToken}</NextContinuationToken>`
+		: '<IsTruncated>false</IsTruncated>';
+	const xml = `<?xml version="1.0"?><ListBucketResult>${entries.join('')}${paging}</ListBucketResult>`;
+	return new TextEncoder().encode(xml).buffer as ArrayBuffer;
+}
+
+function GivenErrorBody(code: string): ArrayBuffer {
+	const xml = `<?xml version="1.0"?><Error><Code>${code}</Code><Message>Something went wrong</Message></Error>`;
+	return new TextEncoder().encode(xml).buffer as ArrayBuffer;
 }

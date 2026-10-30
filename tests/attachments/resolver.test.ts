@@ -4,7 +4,7 @@ import { MemoryObjectCache } from '@/cache/memory-object-cache';
 import type { ObjectCache } from '@/cache/object-cache';
 import { AttachmentReference } from '@/references/attachment-reference';
 import type { ProfileId } from '@/references/profile-id';
-import { ObjectNotFound, type ObjectStore, type StoredObject } from '@/storages/object-store';
+import { ObjectNotFound, type ObjectStore, type ObjectSummary, type StoredObject } from '@/storages/object-store';
 import { ProfileDeleted } from '@/storages/profile-errors';
 import { FakeObjectUrls } from '../support/fake-object-urls';
 
@@ -126,6 +126,8 @@ class RecordingStore implements ObjectStore {
 	has(key: string, object: StoredObject): void {
 		this.objects.set(key, object);
 	}
+
+	async *list(): AsyncGenerator<ObjectSummary> {}
 
 	async get(key: string): Promise<StoredObject> {
 		this.gets.push(key);

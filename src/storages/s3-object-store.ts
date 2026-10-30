@@ -1,6 +1,7 @@
 import { AwsV4Signer } from 'aws4fetch';
 import type { ProfileSettings } from '@/settings/settings';
 import type { Secrets } from '@/settings/secrets';
+import { parseListObjectsResponse } from './list-objects-response';
 import type { Http, HttpRequest, HttpResponse } from './http';
 import {
 	AccessDenied,
@@ -9,6 +10,7 @@ import {
 	StorageUnreachable,
 	type ObjectMetadata,
 	type ObjectStore,
+	type ObjectSummary,
 	type StoredObject,
 } from './object-store';
 
@@ -59,10 +61,18 @@ export class S3ObjectStore implements ObjectStore {
 		};
 	}
 
-	private async request(
-		key: string,
-		options: { method: HttpRequest['method']; headers?: Record<string, string>; body?: ArrayBuffer }
-	): Promise<HttpResponse> {
+	async *list(prefix?: string): AsyncGenerator<ObjectSummary> {
+		let token: string | undefined;
+
+		do {
+			const response = await this.request('', { method: 'GET', query: listQuery(prefix, token) });
+			const page = parseListObjectsResponse(new TextDecoder().decode(response.body));
+			yield* page.objects;
+			token = page.nextToken;
+		} while (token !== undefined);
+	}
+
+	private async request(key: string, options: RequestOptions): Promise<HttpResponse> {
 		const credentials = this.credentials();
 		const request = await this.sign(key, credentials, options);
 
@@ -74,9 +84,16 @@ export class S3ObjectStore implements ObjectStore {
 		}
 
 		if (response.status >= 200 && response.status < 300) return response;
-		if (response.status === 404) throw new ObjectNotFound(key);
-		if (response.status === 401 || response.status === 403) throw new AccessDenied(key);
-		throw new StorageUnreachable(`HTTP ${response.status}`);
+
+		const code = errorCodeOf(response);
+		const suffix = code ? ` (${code})` : '';
+
+		if (response.status === 404 && (key === '' || code === 'NoSuchBucket')) {
+			throw new StorageUnreachable(`bucket or endpoint not found${suffix}`);
+		}
+		if (response.status === 404) throw new ObjectNotFound(`${key}${suffix}`);
+		if (response.status === 401 || response.status === 403) throw new AccessDenied(`${key}${suffix}`);
+		throw new StorageUnreachable(`HTTP ${response.status}${suffix}`);
 	}
 
 	private credentials(): Credentials {
@@ -86,15 +103,11 @@ export class S3ObjectStore implements ObjectStore {
 		return { accessKeyId, secretAccessKey };
 	}
 
-	private async sign(
-		key: string,
-		credentials: Credentials,
-		options: { method: HttpRequest['method']; headers?: Record<string, string>; body?: ArrayBuffer }
-	): Promise<HttpRequest> {
+	private async sign(key: string, credentials: Credentials, options: RequestOptions): Promise<HttpRequest> {
 		const payload = options.body ?? new ArrayBuffer(0);
 		const signer = new AwsV4Signer({
 			method: options.method,
-			url: this.urlFor(key),
+			url: this.urlFor(key, options.query),
 			headers: { ...options.headers, 'x-amz-content-sha256': await sha256Hex(payload) },
 			body: options.body,
 			service: 's3',
@@ -116,13 +129,14 @@ export class S3ObjectStore implements ObjectStore {
 		return region === 'auto' && !endpoint.trim() ? 'us-east-1' : region;
 	}
 
-	private urlFor(key: string): string {
+	private urlFor(key: string, query = ''): string {
 		const path = key.split('/').map(encodeSegment).join('/');
 		const endpoint = new URL(this.endpoint());
+		const search = query === '' ? '' : `?${query}`;
 		if (this.profile.forcePathStyle) {
-			return `${endpoint.origin}${endpoint.pathname.replace(/\/$/, '')}/${this.profile.bucket}/${path}`;
+			return `${endpoint.origin}${endpoint.pathname.replace(/\/$/, '')}/${this.profile.bucket}/${path}${search}`;
 		}
-		return `${endpoint.protocol}//${this.profile.bucket}.${endpoint.host}${endpoint.pathname.replace(/\/$/, '')}/${path}`;
+		return `${endpoint.protocol}//${this.profile.bucket}.${endpoint.host}${endpoint.pathname.replace(/\/$/, '')}/${path}${search}`;
 	}
 
 	private endpoint(): string {
@@ -133,8 +147,26 @@ export class S3ObjectStore implements ObjectStore {
 	}
 }
 
+interface RequestOptions {
+	method: HttpRequest['method'];
+	headers?: Record<string, string>;
+	body?: ArrayBuffer;
+	query?: string;
+}
+
+function listQuery(prefix: string | undefined, token: string | undefined): string {
+	const params = ['list-type=2'];
+	if (prefix) params.push(`prefix=${encodeSegment(prefix)}`);
+	if (token) params.push(`continuation-token=${encodeSegment(token)}`);
+	return params.join('&');
+}
+
 function encodeSegment(segment: string): string {
 	return encodeURIComponent(segment).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function errorCodeOf(response: HttpResponse): string | undefined {
+	return /<Code>([^<]+)<\/Code>/.exec(new TextDecoder().decode(response.body))?.[1];
 }
 
 function header(response: HttpResponse, name: string): string | undefined {
