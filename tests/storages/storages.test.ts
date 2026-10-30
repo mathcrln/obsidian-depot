@@ -4,6 +4,7 @@ import type { ProfileSettings } from '@/settings/settings';
 import { NoDefaultProfile, ProfileDeleted, UnknownProfile } from '@/storages/profile-errors';
 import type { ObjectStore } from '@/storages/object-store';
 import { Storages } from '@/storages/storages';
+import { MemoryUploadRegistry } from '@/uploads/memory-upload-registry';
 import { FakeObjectStore } from '../support/fake-object-store';
 
 describe('default', () => {
@@ -41,6 +42,17 @@ describe('profile', () => {
 
 		expect(stores.get('two')?.puts).toHaveLength(1);
 		expect(stores.get('one')?.puts).toHaveLength(0);
+	});
+
+	it('uploads with the path settings of its profile', async () => {
+		const { storages, settings, stores } = GivenStorages('one', 'two');
+		settings.updateProfile('two', { pathPattern: 'two/{id}' });
+
+		await storages.profile('two').upload({ name: 'a.png', arrayBuffer: async () => new ArrayBuffer(1) });
+		await storages.profile('one').upload({ name: 'a.png', arrayBuffer: async () => new ArrayBuffer(1) });
+
+		expect(stores.get('two')?.puts[0]?.key).toMatch(/^two\/[0-9a-f]{32}$/);
+		expect(stores.get('one')?.puts[0]?.key).toMatch(/^\d{4}\/\d{2}\/[0-9a-f]{32}\.png$/);
 	});
 
 	it('throws UnknownProfile for an unknown id', () => {
@@ -99,6 +111,44 @@ describe('all', () => {
 	});
 });
 
+describe('renamed profiles', () => {
+	it('resolves the previous id to the renamed profile', async () => {
+		const { storages, settings, stores } = GivenStorages('old', 'other');
+		settings.renameProfile('old', 'fresh');
+		stores.set('fresh', stores.get('old')!);
+
+		expect(storages.profile('old').id.value).toBe('fresh');
+		expect(storages.profile('fresh').id.value).toBe('fresh');
+		expect(storages.storeFor('old')).toBe(stores.get('fresh'));
+	});
+
+	it('recognizes the previous id', () => {
+		const { storages, settings } = GivenStorages('old');
+		settings.renameProfile('old', 'fresh');
+
+		expect(storages.recognizes('old')).toBe(true);
+		expect(storages.recognizes('fresh')).toBe(true);
+	});
+
+	it('stops resolving a forgotten alias but not as deleted', () => {
+		const { storages, settings } = GivenStorages('old');
+		settings.renameProfile('old', 'fresh');
+		settings.forgetAlias('fresh', 'old');
+
+		expect(storages.recognizes('old')).toBe(false);
+		expect(() => storages.profile('old')).toThrow(UnknownProfile);
+	});
+
+	it('reports aliases of a deleted profile as deleted', () => {
+		const { storages, settings } = GivenStorages('old');
+		settings.renameProfile('old', 'fresh');
+		settings.removeProfile('fresh');
+
+		expect(() => storages.profile('old')).toThrow(ProfileDeleted);
+		expect(storages.recognizes('old')).toBe(true);
+	});
+});
+
 function GivenStorages(...ids: string[]) {
 	const settings = Settings.empty();
 	const stores = new Map<string, FakeObjectStore>();
@@ -111,6 +161,7 @@ function GivenStorages(...ids: string[]) {
 	const storages = new Storages({
 		settings,
 		storeFor: (profile: ProfileSettings): ObjectStore => stores.get(profile.id) ?? new FakeObjectStore(),
+		registry: new MemoryUploadRegistry(),
 		attach: (reference, name) => ({ reference, name }),
 	});
 

@@ -1,178 +1,168 @@
-import { Notice, PluginSettingTab, Setting } from 'obsidian';
+import { Notice, PluginSettingTab } from 'obsidian';
+import type { SettingDefinitionItem } from 'obsidian';
 import type DepotPlugin from '@/main';
-import type { ProfileConnection, ProfileSettings } from '@/settings/settings';
+import { AddProfileModal } from '@/settings/add-profile-modal';
+import { RenameProfileModal } from '@/settings/rename-profile';
+import { ProfilePages } from '@/settings/profile-page';
+import { ObjectId } from '@/uploads/object-ids';
+
+type TextField = 'endpoint' | 'bucket' | 'region' | 'idStyle';
+type ToggleField = 'forcePathStyle' | 'lowercaseNames' | 'detectDuplicates';
 
 export class DepotSettingTab extends PluginSettingTab {
-	private newProfileId = '';
+	private readonly profilePages: ProfilePages;
 
 	constructor(private readonly plugin: DepotPlugin) {
 		super(plugin.app, plugin);
-	}
-
-	display(): void {
-		const { containerEl } = this;
-		const settings = this.plugin.depot.settings;
-
-		containerEl.empty();
-
-		this.renderDefaultProfile(containerEl);
-		this.renderAddProfile(containerEl);
-
-		for (const profile of settings.profiles) {
-			this.renderProfile(containerEl, profile);
-		}
-
-		new Setting(containerEl).setName('Cache').setHeading();
-		new Setting(containerEl)
-			.setName('Clear cache')
-			.setDesc('Forget cached uploads and previews. Files in your storage are not touched.')
-			.addButton((button) =>
-				button.setButtonText('Clear cache').onClick(async () => {
-					await this.plugin.depot.clearCache();
-					new Notice('Cache cleared.');
-				})
-			);
-	}
-
-	private renderDefaultProfile(containerEl: HTMLElement): void {
-		const settings = this.plugin.depot.settings;
-		const setting = new Setting(containerEl).setName('Default profile');
-
-		if (settings.profiles.length === 0) {
-			setting.setDesc('Add a profile to choose a default.').addDropdown((dropdown) => dropdown.setDisabled(true));
-			return;
-		}
-
-		setting.setDesc('Where pasted, dropped, and uploaded attachments go.').addDropdown((dropdown) => {
-			const current = settings.defaultProfile?.id;
-
-			if (current === undefined) {
-				dropdown.addOption('', 'Choose a profile');
-			}
-
-			for (const profile of settings.profiles) {
-				dropdown.addOption(profile.id, profile.id);
-			}
-
-			dropdown.setValue(current ?? '').onChange(async (id) => {
-				if (!id) return;
-				settings.makeDefault(id);
-				await this.commit(true);
-			});
+		this.profilePages = new ProfilePages({
+			app: plugin.app,
+			settings: () => this.settings,
+			save: () => plugin.depot.save(),
+			rename: (id) => this.renameProfile(id),
+			refresh: () => this.update(),
 		});
 	}
 
-	private renderAddProfile(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName('Add profile')
-			.setDesc('Lowercase letters, digits, and hyphens, starting with a letter.')
-			.addText((text) =>
-				text
-					.setPlaceholder('Identifier')
-					.setValue(this.newProfileId)
-					.onChange((value) => {
-						this.newProfileId = value.trim();
-					})
-			)
-			.addButton((button) =>
-				button
-					.setButtonText('Add')
-					.setCta()
-					.onClick(async () => {
-						try {
-							this.plugin.depot.settings.addProfile(this.newProfileId);
-						} catch (error) {
-							new Notice(error instanceof Error ? error.message : 'Could not add the profile.');
-							return;
-						}
-
-						this.newProfileId = '';
-						await this.commit(true);
-					})
-			);
+	private get settings() {
+		return this.plugin.depot.settings;
 	}
 
-	private renderProfile(containerEl: HTMLElement, profile: ProfileSettings): void {
-		const id = profile.id;
-
-		new Setting(containerEl)
-			.setName(id)
-			.setDesc('Deleting a profile makes existing references to it show as unavailable.')
-			.setHeading()
-			.addButton((button) =>
-				button
-					.setButtonText('Delete')
-					.setWarning()
-					.onClick(async () => {
-						this.plugin.depot.settings.removeProfile(id);
-						await this.commit(true);
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Endpoint')
-			.setDesc('Leave empty for AWS S3.')
-			.addText((text) =>
-				text
-					.setPlaceholder('https://<account>.r2.cloudflarestorage.com')
-					.setValue(profile.endpoint)
-					.onChange((value) => this.change(id, { endpoint: value.trim() }))
-			);
-
-		new Setting(containerEl)
-			.setName('Bucket')
-			.addText((text) => text.setValue(profile.bucket).onChange((value) => this.change(id, { bucket: value.trim() })));
-
-		new Setting(containerEl).setName('Region').addText((text) =>
-			text
-				.setPlaceholder('auto')
-				.setValue(profile.region)
-				.onChange((value) => this.change(id, { region: value.trim() }))
-		);
-
-		new Setting(containerEl)
-			.setName('Path-style addressing')
-			.setDesc('Needed for MinIO and some self-hosted services.')
-			.addToggle((toggle) =>
-				toggle.setValue(profile.forcePathStyle).onChange((value) => this.change(id, { forcePathStyle: value }))
-			);
-
-		this.addCredential(containerEl, 'Access key ID', profile.accessKeySecret || `depot-${id}-access-key-id`, (secretId) =>
-			this.change(id, { accessKeySecret: secretId })
-		);
-		this.addCredential(
-			containerEl,
-			'Secret access key',
-			profile.secretKeySecret || `depot-${id}-secret-access-key`,
-			(secretId) => this.change(id, { secretKeySecret: secretId })
-		);
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				name: 'Default profile',
+				desc: 'Where pasted, dropped, and uploaded attachments go.',
+				visible: () => this.settings.profiles.length > 0,
+				control: { type: 'dropdown', key: 'defaultProfile', options: this.defaultProfileOptions() },
+			},
+			{
+				type: 'list',
+				heading: 'Profiles',
+				items: this.settings.profiles.map((profile) => this.profilePages.of(profile)),
+				emptyState: 'No profiles yet.',
+				addItem: { name: 'Add profile', action: () => this.askForProfile() },
+				onDelete: (index) => void this.deleteProfile(index),
+			},
+			{
+				type: 'group',
+				heading: 'Cache',
+				items: [
+					{
+						name: 'Clear cache',
+						desc: 'Forget cached uploads and previews. Files in your storage are not touched.',
+						action: () => void this.clearCache(),
+					},
+				],
+			},
+		];
 	}
 
-	private addCredential(containerEl: HTMLElement, name: string, secretId: string, onStored: (secretId: string) => void): void {
-		const stored = Boolean(this.app.secretStorage.getSecret(secretId));
+	getControlValue(key: string): unknown {
+		if (key === 'defaultProfile') {
+			return this.settings.defaultProfile?.id ?? '';
+		}
 
-		new Setting(containerEl)
-			.setName(name)
-			.setDesc('Kept in Obsidian secret storage, never in plugin settings.')
-			.addText((text) => {
-				text.inputEl.type = 'password';
-				text.setPlaceholder(stored ? 'Stored — type to replace' : 'Not set').onChange((value) => {
-					this.app.secretStorage.setSecret(secretId, value.trim());
-					onStored(secretId);
-				});
-			});
+		const field = parseKey(key);
+		const profile = field && this.settings.profile(field.id);
+
+		return field && profile ? profile[field.name] : undefined;
 	}
 
-	private change(id: string, changes: ProfileConnection): void {
-		this.plugin.depot.settings.updateProfile(id, changes);
-		void this.commit(false);
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key === 'defaultProfile') {
+			if (typeof value === 'string' && value !== '') {
+				this.settings.makeDefault(value);
+				await this.commit(true);
+			}
+
+			return;
+		}
+
+		const field = parseKey(key);
+
+		if (field === undefined || this.settings.profile(field.id) === undefined) return;
+
+		if (field.name === 'forcePathStyle' || field.name === 'lowercaseNames' || field.name === 'detectDuplicates') {
+			this.settings.updateProfile(field.id, { [field.name]: value === true });
+		} else if (field.name === 'idStyle') {
+			if (ObjectId.isStyle(value)) {
+				this.settings.updateProfile(field.id, { idStyle: value });
+				await this.commit(true);
+			}
+
+			return;
+		} else if (typeof value === 'string') {
+			this.settings.updateProfile(field.id, { [field.name]: value.trim() });
+		}
+
+		await this.commit(false);
 	}
 
-	private async commit(rerender: boolean): Promise<void> {
+	private defaultProfileOptions(): Record<string, string> {
+		const options: Record<string, string> = this.settings.defaultProfile === undefined ? { '': 'Choose a profile' } : {};
+
+		for (const profile of this.settings.profiles) {
+			options[profile.id] = profile.id;
+		}
+
+		return options;
+	}
+
+	private askForProfile(): void {
+		new AddProfileModal(this.app, this.settings, async (id) => {
+			this.settings.addProfile(id);
+			await this.commit(true);
+		}).open();
+	}
+
+	private renameProfile(id: string): void {
+		new RenameProfileModal(
+			{
+				app: this.app,
+				settings: this.settings,
+				save: () => this.plugin.depot.save(),
+				onChange: () => {
+					this.update();
+					this.showHome();
+				},
+			},
+			id
+		).open();
+	}
+
+	// The settings API has no public way to leave a sub-page, so reopen the tab through the internal one when it exists.
+	private showHome(): void {
+		const setting = (this.app as unknown as { setting?: { openTabById?: (id: string) => unknown } }).setting;
+
+		setting?.openTabById?.(this.plugin.manifest.id);
+	}
+
+	private async deleteProfile(index: number): Promise<void> {
+		const profile = this.settings.profiles[index];
+
+		if (profile === undefined) return;
+
+		this.settings.removeProfile(profile.id);
+		await this.commit(true);
+		new Notice('Profile deleted. References to it now show as unavailable.');
+	}
+
+	private async clearCache(): Promise<void> {
+		await this.plugin.depot.clearCache();
+		new Notice('Cache cleared.');
+	}
+
+	private async commit(structural: boolean): Promise<void> {
 		await this.plugin.depot.save();
 
-		if (rerender) {
-			this.display();
+		if (structural) {
+			this.update();
 		}
 	}
+}
+
+function parseKey(key: string): { id: string; name: TextField | ToggleField } | undefined {
+	const match = /^profile\.([^.]+)\.(endpoint|bucket|region|forcePathStyle|lowercaseNames|idStyle|detectDuplicates)$/.exec(key);
+
+	return match ? { id: match[1]!, name: match[2] as TextField | ToggleField } : undefined;
 }

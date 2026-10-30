@@ -1,5 +1,8 @@
 import { ProfileId } from '@/references/profile-id';
 import { UnknownProfile } from '@/storages/profile-errors';
+import { DEFAULT_ID_STYLE, ObjectId } from '@/uploads/object-ids';
+import type { IdStyle } from '@/uploads/object-ids';
+import { PathPattern } from '@/uploads/path-pattern';
 
 export interface ProfileSettings {
 	id: string;
@@ -9,6 +12,11 @@ export interface ProfileSettings {
 	forcePathStyle: boolean;
 	accessKeySecret: string;
 	secretKeySecret: string;
+	pathPattern: string;
+	lowercaseNames: boolean;
+	idStyle: IdStyle;
+	detectDuplicates: boolean;
+	aliases: string[];
 }
 
 export interface DepotSettings {
@@ -49,6 +57,8 @@ export class Settings {
 			}
 		}
 
+		claimAliases(entries);
+
 		const retired: string[] = [];
 
 		for (const raw of Array.isArray(record['retiredProfiles']) ? (record['retiredProfiles'] as unknown[]) : []) {
@@ -62,7 +72,7 @@ export class Settings {
 		return new Settings(
 			entries,
 			typeof defaultId === 'string' && entries.some((entry) => entry.id === defaultId) ? defaultId : null,
-			retired.filter((id) => !entries.some((entry) => entry.id === id))
+			retired.filter((id) => !entries.some((entry) => entry.id === id || entry.aliases.includes(id)))
 		);
 	}
 
@@ -82,6 +92,10 @@ export class Settings {
 		return this.entries.find((entry) => entry.id === id);
 	}
 
+	profileFor(idOrAlias: string): ProfileSettings | undefined {
+		return this.entries.find((entry) => entry.id === idOrAlias || entry.aliases.includes(idOrAlias));
+	}
+
 	isRetired(id: string): boolean {
 		return this.retired.includes(id);
 	}
@@ -89,7 +103,7 @@ export class Settings {
 	addProfile(id: string, connection: ProfileConnection = {}): ProfileSettings {
 		const parsed = ProfileId.parse(id);
 
-		if (this.profile(parsed.value) !== undefined) {
+		if (this.profileFor(parsed.value) !== undefined) {
 			throw new DuplicateProfile(parsed.value);
 		}
 
@@ -105,13 +119,41 @@ export class Settings {
 		Object.assign(this.existing(id), definedOnly(changes));
 	}
 
+	renameProfile(from: string, to: string): void {
+		const profile = this.existing(from);
+		const target = ProfileId.parse(to).value;
+		const owner = this.profileFor(target);
+
+		if (owner !== undefined && owner !== profile) {
+			throw new DuplicateProfile(target);
+		}
+
+		if (target === profile.id) {
+			return;
+		}
+
+		if (this.defaultId === profile.id) {
+			this.defaultId = target;
+		}
+
+		profile.aliases = [...profile.aliases.filter((alias) => alias !== target), profile.id];
+		profile.id = target;
+		this.retired.splice(0, this.retired.length, ...this.retired.filter((retiredId) => retiredId !== target));
+	}
+
+	forgetAlias(profileId: string, alias: string): void {
+		const profile = this.existing(profileId);
+
+		profile.aliases = profile.aliases.filter((existing) => existing !== alias);
+	}
+
 	removeProfile(id: string): void {
 		const profile = this.existing(id);
 
 		this.entries.splice(this.entries.indexOf(profile), 1);
-		this.retired.push(id);
+		this.retired.push(profile.id, ...profile.aliases);
 
-		if (this.defaultId === id) {
+		if (this.defaultId === profile.id) {
 			this.defaultId = null;
 		}
 	}
@@ -129,7 +171,7 @@ export class Settings {
 	}
 
 	private existing(id: string): ProfileSettings {
-		const profile = this.profile(id);
+		const profile = this.profileFor(id);
 
 		if (profile === undefined) {
 			throw new UnknownProfile(id);
@@ -140,7 +182,20 @@ export class Settings {
 }
 
 function blankProfile(id: string): ProfileSettings {
-	return { id, endpoint: '', bucket: '', region: 'auto', forcePathStyle: false, accessKeySecret: '', secretKeySecret: '' };
+	return {
+		id,
+		endpoint: '',
+		bucket: '',
+		region: 'auto',
+		forcePathStyle: false,
+		accessKeySecret: '',
+		secretKeySecret: '',
+		pathPattern: PathPattern.DEFAULT.toString(),
+		lowercaseNames: true,
+		idStyle: DEFAULT_ID_STYLE,
+		detectDuplicates: false,
+		aliases: [],
+	};
 }
 
 function definedOnly(connection: ProfileConnection): ProfileConnection {
@@ -162,11 +217,34 @@ function normalise(raw: unknown): ProfileSettings | undefined {
 		forcePathStyle: typeof raw['forcePathStyle'] === 'boolean' ? raw['forcePathStyle'] : blank.forcePathStyle,
 		accessKeySecret: text(raw['accessKeySecret'], blank.accessKeySecret),
 		secretKeySecret: text(raw['secretKeySecret'], blank.secretKeySecret),
+		pathPattern: validPattern(raw['pathPattern'], blank.pathPattern),
+		lowercaseNames: typeof raw['lowercaseNames'] === 'boolean' ? raw['lowercaseNames'] : blank.lowercaseNames,
+		idStyle: ObjectId.isStyle(raw['idStyle']) ? raw['idStyle'] : blank.idStyle,
+		detectDuplicates: typeof raw['detectDuplicates'] === 'boolean' ? raw['detectDuplicates'] : blank.detectDuplicates,
+		aliases: validIds(raw['aliases']),
 	};
+}
+
+function validIds(value: unknown): string[] {
+	const ids = Array.isArray(value) ? (value as unknown[]) : [];
+
+	return ids.filter((id, index): id is string => typeof id === 'string' && ProfileId.isValid(id) && ids.indexOf(id) === index);
+}
+
+function claimAliases(entries: ProfileSettings[]): void {
+	const taken = new Set(entries.map((entry) => entry.id));
+
+	for (const entry of entries) {
+		entry.aliases = entry.aliases.filter((alias) => !taken.has(alias) && taken.add(alias));
+	}
 }
 
 function text(value: unknown, fallback: string): string {
 	return typeof value === 'string' ? value : fallback;
+}
+
+function validPattern(value: unknown, fallback: string): string {
+	return typeof value === 'string' && PathPattern.isValid(value) ? value : fallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -3,22 +3,26 @@ import { ProfileId } from '@/references/profile-id';
 import type { ProfileSettings, Settings } from '@/settings/settings';
 import type { ObjectStore } from '@/storages/object-store';
 import { Profile } from '@/storages/profile';
+import type { UploadRegistry } from '@/uploads/upload-registry';
 import { NoDefaultProfile, ProfileDeleted, UnknownProfile } from '@/storages/profile-errors';
 
 export interface StoragesOptions<A> {
 	settings: Settings;
 	storeFor: (profile: ProfileSettings) => ObjectStore;
+	registry: UploadRegistry;
 	attach: (reference: AttachmentReference, name: string) => A;
 }
 
 export class Storages<A> {
 	private readonly settings: Settings;
 	private readonly createStore: (profile: ProfileSettings) => ObjectStore;
+	private readonly registry: UploadRegistry;
 	private readonly attach: (reference: AttachmentReference, name: string) => A;
 
-	constructor({ settings, storeFor, attach }: StoragesOptions<A>) {
+	constructor({ settings, storeFor, registry, attach }: StoragesOptions<A>) {
 		this.settings = settings;
 		this.createStore = storeFor;
+		this.registry = registry;
 		this.attach = attach;
 	}
 
@@ -41,7 +45,7 @@ export class Storages<A> {
 	}
 
 	recognizes(id: string): boolean {
-		return this.settings.profile(id) !== undefined || this.settings.isRetired(id);
+		return this.settings.profileFor(id) !== undefined || this.settings.isRetired(id);
 	}
 
 	all(): Profile<A>[] {
@@ -49,7 +53,7 @@ export class Storages<A> {
 	}
 
 	private settingsFor(id: string): ProfileSettings {
-		const settings = this.settings.profile(id);
+		const settings = this.settings.profileFor(id);
 
 		if (settings !== undefined) {
 			return settings;
@@ -59,6 +63,12 @@ export class Storages<A> {
 	}
 
 	private build(settings: ProfileSettings): Profile<A> {
-		return new Profile({ id: ProfileId.parse(settings.id), store: this.createStore(settings), attach: this.attach });
+		return new Profile({
+			id: ProfileId.parse(settings.id),
+			settings,
+			store: this.createStore(settings),
+			registry: this.registry,
+			attach: this.attach,
+		});
 	}
 }
