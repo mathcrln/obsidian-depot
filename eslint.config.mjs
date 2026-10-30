@@ -3,6 +3,7 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 
 export default defineConfig(
 	globalIgnores([
+		'.local/**',
 		'node_modules',
 		'main.js',
 		'tests',
@@ -25,5 +26,10 @@ export default defineConfig(
 			},
 		},
 	},
-	...obsidianmd.configs.recommended
+	...obsidianmd.configs.recommended,
+	{
+		rules: {
+			'obsidianmd/ui/sentence-case': ['warn', { ignoreWords: ['Depot'] }],
+		},
+	}
 );
