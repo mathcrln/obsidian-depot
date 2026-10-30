@@ -19,7 +19,8 @@
 1. Easier profile setup: provider presets, pasted URLs filled in automatically, and a connection test.
 2. Delete unused files from the library, or mark them as kept. See [library](docs/requirements/library.md#cleanup).
 3. Convert existing public links into references. See [migration](docs/requirements/migration.md).
-4. Profiles that reuse another profile's credentials.
+4. Import vault attachments into a profile, and export them back. See [migration](docs/requirements/migration.md#import-from-the-vault).
+5. Profiles that reuse another profile's credentials.
 
 ## Done
 
