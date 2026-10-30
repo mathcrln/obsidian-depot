@@ -1,3 +1,4 @@
+import { Carbon } from '@/utils/carbon';
 import type { LibraryItem } from '@/library/library-item';
 
 export interface LibraryGroup {
@@ -7,7 +8,6 @@ export interface LibraryGroup {
 }
 
 export function groupByMonth(items: LibraryItem[], locale?: string): LibraryGroup[] {
-	const format = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' });
 	const broken: LibraryItem[] = [];
 	const undated: LibraryItem[] = [];
 	const months = new Map<string, LibraryGroup>();
@@ -18,9 +18,8 @@ export function groupByMonth(items: LibraryItem[], locale?: string): LibraryGrou
 		} else if (item.lastModified === undefined) {
 			undated.push(item);
 		} else {
-			const date = new Date(item.lastModified);
-			const id = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-			const group = months.get(id) ?? { id, label: format.format(date), items: [] };
+			const id = Carbon.format(item.lastModified, 'YYYY-MM');
+			const group = months.get(id) ?? { id, label: Carbon.formatMonth(item.lastModified, { locale }), items: [] };
 			group.items.push(item);
 			months.set(id, group);
 		}

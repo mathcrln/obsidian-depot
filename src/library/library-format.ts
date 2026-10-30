@@ -1,3 +1,4 @@
+import { Carbon } from '@/utils/carbon';
 import type { LibraryItem } from '@/library/library-item';
 
 export function humanSize(bytes: number): string {
@@ -25,14 +26,10 @@ export function extensionLabel(key: string): string {
 	return dot > 0 ? name.slice(dot + 1).toUpperCase() : '';
 }
 
-export function formatDate(timestamp: number, locale?: string): string {
-	return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(timestamp);
-}
-
 export function tileTitle(item: Pick<LibraryItem, 'key' | 'size' | 'lastModified'>, locale?: string): string {
 	const parts = [fileName(item.key)];
 	if (item.size !== undefined) parts.push(humanSize(item.size));
-	if (item.lastModified !== undefined) parts.push(formatDate(item.lastModified, locale));
+	if (item.lastModified !== undefined) parts.push(Carbon.formatDate(item.lastModified, { locale }));
 
 	return parts.join(' · ');
 }

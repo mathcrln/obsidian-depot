@@ -63,10 +63,6 @@ export async function updateReferences(
 	return result;
 }
 
-export function plural(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
 function sampleOf(key: string | undefined): string | undefined {
 	if (key === undefined) return undefined;
 

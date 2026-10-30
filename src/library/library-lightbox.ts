@@ -1,8 +1,9 @@
+import { Carbon } from '@/utils/carbon';
 import { Modal, setIcon, type App, type MarkdownView } from 'obsidian';
 import type { Depot } from '@/depot';
 import { renderActions } from '@/library/library-actions';
 import { adjacentItem } from '@/library/library-filter';
-import { fileName, formatDate, humanSize } from '@/library/library-format';
+import { fileName, humanSize } from '@/library/library-format';
 import type { LibraryItem } from '@/library/library-item';
 import { hasThumbnail, loadImage, renderPlaceholder } from '@/library/library-media';
 import { AttachmentReference } from '@/references/attachment-reference';
@@ -87,7 +88,7 @@ export class LibraryLightbox extends Modal {
 		const position = `${this.items.indexOf(item) + 1} of ${this.items.length}`;
 		const facts = [position];
 		if (item.size !== undefined) facts.push(humanSize(item.size));
-		if (item.lastModified !== undefined) facts.push(formatDate(item.lastModified));
+		if (item.lastModified !== undefined) facts.push(Carbon.formatDate(item.lastModified));
 		this.captionEl.empty();
 		this.captionEl.createDiv({ cls: 'depot-library-lightbox-name', text: fileName(item.key) });
 		this.captionEl.createDiv({ cls: 'depot-library-lightbox-facts', text: facts.join(' · ') });

@@ -1,6 +1,7 @@
+import { Str } from '@/utils/str';
 import { Notice } from 'obsidian';
 import type { App, Setting, SettingDefinition, SettingDefinitionPage } from 'obsidian';
-import { findReferences, plural, updateReferences } from '@/settings/reference-updates';
+import { findReferences, updateReferences } from '@/settings/reference-updates';
 import type { ProfileSettings, Settings } from '@/settings/settings';
 import { ObjectId } from '@/uploads/object-ids';
 import type { IdStyle } from '@/uploads/object-ids';
@@ -177,11 +178,11 @@ export class ProfilePages {
 		await this.host.save();
 
 		if (failed > 0) {
-			new Notice(`Could not update ${plural(failed, 'note')}. Older references keep working.`);
+			new Notice(`Could not update ${Str.quantity(failed, 'note')}. Older references keep working.`);
 		} else if (references === 0 && removed.length === aliases.length) {
 			new Notice(`No notes used ${removed.join(', ')} — removed ${removed.length === 1 ? 'it' : 'them'}.`);
 		} else {
-			new Notice(`Updated ${plural(references, 'reference')} in ${plural(notes, 'note')}.`);
+			new Notice(`Updated ${Str.quantity(references, 'reference')} in ${Str.quantity(notes, 'note')}.`);
 		}
 	}
 

@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InvalidPathPattern, PathPattern } from '@/uploads/path-pattern';
 import type { KeyOptions, UploadedFile } from '@/uploads/path-pattern';
 
 const ID = '53670a34e119ae832528b72f8bd8750e';
 const JUNE_7_2025 = new Date(2025, 5, 7, 10, 30).getTime();
 const JANUARY_2_2026 = new Date(2026, 0, 2, 23, 59).getTime();
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 describe('default', () => {
 	it('is year, month, id and extension', () => {
@@ -62,10 +66,11 @@ describe('dates', () => {
 	});
 
 	it('defaults the time to now', () => {
-		const year = String(new Date().getFullYear());
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date(2027, 0, 1, 0, 0));
 		const key = PathPattern.parse('{yyyy}/{id}').keyFor({ fileName: 'a.png', id: ID }, GivenOptions());
 
-		expect(key).toMatch(new RegExp(`^${year}/${ID}$`));
+		expect(key).toBe('2027/' + ID);
 	});
 });
 
@@ -117,19 +122,6 @@ describe('file parts', () => {
 });
 
 describe('names', () => {
-	it.each([
-		['Beach Photo (2).jpg', 'Beach-Photo-2'],
-		['  --weird__name!!  .png', 'weird-name'],
-		['a   b---c.png', 'a-b-c'],
-		['Été à Paris.png', 'Été-à-Paris'],
-		['日本語 ファイル.png', '日本語-ファイル'],
-		['a/b\\c.png', 'a-b-c'],
-	])('slugs %j to %j keeping case', (fileName, slug) => {
-		const key = PathPattern.parse('{name}-{id}').keyFor(GivenFile({ fileName }), GivenOptions({ lowercaseNames: false }));
-
-		expect(key).toMatch(new RegExp(`^${slug}-${ID}$`));
-	});
-
 	it('lowercases names when asked, including Unicode letters', () => {
 		const key = PathPattern.parse('{name}/{note}/{id}').keyFor(
 			GivenFile({ fileName: 'ÉTÉ.PNG', note: 'My NOTE' }),

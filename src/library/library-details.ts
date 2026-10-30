@@ -1,7 +1,8 @@
+import { Carbon } from '@/utils/carbon';
 import type { App, MarkdownView } from 'obsidian';
 import type { Depot } from '@/depot';
 import { renderActions } from '@/library/library-actions';
-import { extensionLabel, fileName, formatDate, humanSize } from '@/library/library-format';
+import { extensionLabel, fileName, humanSize } from '@/library/library-format';
 import type { LibraryItem } from '@/library/library-item';
 import { hasThumbnail, loadImage, renderPlaceholder } from '@/library/library-media';
 
@@ -35,7 +36,7 @@ export function renderDetails(
 	fact('Path', item.key);
 	fact('Type', extensionLabel(item.key) || 'File');
 	if (item.size !== undefined) fact('Size', humanSize(item.size));
-	if (item.lastModified !== undefined) fact('Uploaded', formatDate(item.lastModified));
+	if (item.lastModified !== undefined) fact('Uploaded', Carbon.formatDate(item.lastModified));
 	fact('Status', item.status === 'broken' ? 'Broken (object not found)' : item.status === 'used' ? 'Used' : 'Unused');
 
 	parent.createEl('h5', { text: item.notes.length > 0 ? `Used in ${item.notes.length} note(s)` : 'Not used in any note' });

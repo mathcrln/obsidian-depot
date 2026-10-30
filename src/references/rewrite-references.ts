@@ -1,3 +1,5 @@
+import { Str } from '@/utils/str';
+
 export interface Rewritten {
 	text: string;
 	count: number;
@@ -5,7 +7,7 @@ export interface Rewritten {
 
 export function rewriteReferences(text: string, from: string, to: string): Rewritten {
 	let count = 0;
-	const pattern = new RegExp(`(?<![A-Za-z0-9+.-])${escapeRegExp(from)}://`, 'g');
+	const pattern = new RegExp(`(?<![A-Za-z0-9+.-])${Str.escapeRegExp(from)}://`, 'g');
 
 	const rewritten = text.replace(pattern, () => {
 		count++;
@@ -13,8 +15,4 @@ export function rewriteReferences(text: string, from: string, to: string): Rewri
 	});
 
 	return { text: rewritten, count };
-}
-
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -1,3 +1,5 @@
+import { Carbon } from '@/utils/carbon';
+import { Str } from '@/utils/str';
 import { attachmentKindOf } from '@/attachments/attachment-kind';
 import { extensionOf } from '@/uploads/content-types';
 
@@ -45,14 +47,15 @@ export class PathPattern {
 
 	keyFor(file: UploadedFile, options: KeyOptions): string {
 		const time = file.time ?? Date.now();
-		const date = new Date(time);
+		const date = Carbon.parse(time);
+		const nameOptions = { lowercase: options.lowercaseNames };
 		const extension = extensionOf(file.fileName) ?? '';
-		const note = slug(file.note ?? '', options.lowercaseNames) || slug(UNTITLED_NOTE, options.lowercaseNames);
+		const note = Str.slug(file.note ?? '', nameOptions) || UNTITLED_NOTE;
 		const values: Record<string, () => string> = {
-			yyyy: () => String(date.getFullYear()).padStart(4, '0'),
-			mm: () => String(date.getMonth() + 1).padStart(2, '0'),
-			dd: () => String(date.getDate()).padStart(2, '0'),
-			name: () => slug(nameWithoutExtension(file.fileName, extension), options.lowercaseNames),
+			yyyy: () => Carbon.format(date, 'YYYY'),
+			mm: () => Carbon.format(date, 'MM'),
+			dd: () => Carbon.format(date, 'DD'),
+			name: () => Str.slug(nameWithoutExtension(file.fileName, extension), nameOptions),
 			ext: () => extension,
 			id: () => file.id,
 			type: () => attachmentKindOf(file.fileName),
@@ -103,10 +106,4 @@ export class PathPattern {
 
 function nameWithoutExtension(fileName: string, extension: string): string {
 	return extension === '' ? fileName.replace(/\.$/, '') : fileName.slice(0, -(extension.length + 1));
-}
-
-function slug(value: string, lowercase: boolean): string {
-	const slugged = value.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
-
-	return lowercase ? slugged.toLowerCase() : slugged;
 }

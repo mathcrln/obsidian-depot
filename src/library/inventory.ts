@@ -1,3 +1,4 @@
+import { Str } from '@/utils/str';
 import { attachmentKindOf } from '@/attachments/attachment-kind';
 import type { ObjectSummary } from '@/storages/object-store';
 import type { LibraryItem, ReferenceUse } from './library-item';
@@ -46,17 +47,13 @@ function notesOf(profile: string, uses: ReferenceUse[]): Map<string, string[]> {
 		notes.set(use.key, (notes.get(use.key) ?? new Set()).add(use.note));
 	}
 
-	return new Map([...notes].map(([key, set]) => [key, [...set].sort(compare)]));
+	return new Map([...notes].map(([key, set]) => [key, [...set].sort(Str.compare)]));
 }
 
 function byKey(a: LibraryItem, b: LibraryItem): number {
-	return compare(a.key, b.key);
+	return Str.compare(a.key, b.key);
 }
 
 function newestFirst(a: LibraryItem, b: LibraryItem): number {
 	return (b.lastModified ?? 0) - (a.lastModified ?? 0) || byKey(a, b);
-}
-
-function compare(a: string, b: string): number {
-	return a < b ? -1 : a > b ? 1 : 0;
 }

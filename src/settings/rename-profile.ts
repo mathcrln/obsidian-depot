@@ -1,7 +1,8 @@
+import { Str } from '@/utils/str';
 import { Modal, Notice, Setting } from 'obsidian';
 import type { App } from 'obsidian';
 import { ProfileId } from '@/references/profile-id';
-import { findReferences, plural, updateReferences } from '@/settings/reference-updates';
+import { findReferences, updateReferences } from '@/settings/reference-updates';
 import type { Found } from '@/settings/reference-updates';
 import { DuplicateProfile, type Settings } from '@/settings/settings';
 
@@ -76,7 +77,9 @@ export class RenameProfileModal extends Modal {
 		}
 
 		const summary = this.impactEl.createEl('p');
-		summary.createEl('strong', { text: `${plural(references, 'reference')} in ${plural(affected.length, 'note')}` });
+		summary.createEl('strong', {
+			text: `${Str.quantity(references, 'reference')} in ${Str.quantity(affected.length, 'note')}`,
+		});
 		summary.appendText(` use ${this.from}://.`);
 
 		const details = this.impactEl.createEl('details', { cls: 'depot-rename-notes' });
@@ -121,7 +124,7 @@ export class RenameProfileModal extends Modal {
 		};
 
 		if (affected.length > 0) {
-			add(`Rename and update ${plural(affected.length, 'note')}`, () => void this.submit(true), true);
+			add(`Rename and update ${Str.quantity(affected.length, 'note')}`, () => void this.submit(true), true);
 			add('Rename only', () => void this.submit(false));
 		} else {
 			add('Rename', () => void this.submit(false), true, valid && this.found !== undefined);
@@ -173,8 +176,8 @@ export class RenameProfileModal extends Modal {
 		this.close();
 		new Notice(
 			result.failed === 0
-				? `Updated ${plural(result.references, 'reference')} in ${plural(result.notes, 'note')}.`
-				: `Could not update ${plural(result.failed, 'note')}. Old references still work.`
+				? `Updated ${Str.quantity(result.references, 'reference')} in ${Str.quantity(result.notes, 'note')}.`
+				: `Could not update ${Str.quantity(result.failed, 'note')}. Old references still work.`
 		);
 	}
 

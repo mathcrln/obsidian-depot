@@ -1,3 +1,4 @@
+import { Str } from '@/utils/str';
 import type { AttachmentKind } from '@/attachments/attachment-kind';
 import type { LibraryItem, LibraryStatus } from '@/library/library-item';
 
@@ -37,7 +38,7 @@ export function adjacentItem(items: LibraryItem[], current: LibraryItem, offset:
 }
 
 function matching(items: LibraryItem[], { query, kind }: LibraryQuery): LibraryItem[] {
-	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+	const words = Str.words(query.toLowerCase());
 
 	return items.filter((item) => {
 		if (kind !== 'all' && item.kind !== kind) return false;
