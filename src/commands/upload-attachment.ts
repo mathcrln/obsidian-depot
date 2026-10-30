@@ -5,12 +5,12 @@ export function registerUploadCommand(plugin: DepotPlugin): void {
 	plugin.addCommand({
 		id: 'upload-attachment',
 		name: 'Upload attachment',
-		editorCallback: (editor) => {
+		editorCallback: (editor, ctx) => {
 			const input = activeDocument.createElement('input');
 			input.type = 'file';
 			input.multiple = true;
 			input.addEventListener('change', () => {
-				void uploadIntoEditor(plugin.depot, editor, Array.from(input.files ?? []));
+				void uploadIntoEditor(plugin.depot, editor, Array.from(input.files ?? []), ctx.file);
 			});
 			input.click();
 		},

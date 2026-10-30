@@ -11,6 +11,9 @@ import { obsidianSecrets } from '@/platform/obsidian-secrets';
 import { Settings } from '@/settings/settings';
 import { S3ObjectStore } from '@/storages/s3-object-store';
 import { Storages } from '@/storages/storages';
+import { IndexedDbUploadRegistry } from '@/uploads/indexed-db-upload-registry';
+import { MemoryUploadRegistry } from '@/uploads/memory-upload-registry';
+import type { UploadRegistry } from '@/uploads/upload-registry';
 
 export class Depot {
 	private constructor(
@@ -19,23 +22,28 @@ export class Depot {
 		readonly attachments: Attachments,
 		private readonly resolver: Resolver,
 		private readonly cache: ObjectCache & { close?(): void },
+		private readonly registry: UploadRegistry & { close?(): void },
 		private readonly persist: (settings: Settings) => Promise<void>
 	) {}
 
 	static async boot(plugin: Plugin): Promise<Depot> {
 		const settings = Settings.from(await plugin.loadData());
 		const cache = await openCache(`depot-cache-${plugin.app.vault.getName()}`);
+		const registry = await openRegistry(`depot-registry-${plugin.app.vault.getName()}`);
 		const secrets = obsidianSecrets(plugin.app);
 
 		const storages: Storages<Attachment> = new Storages({
 			settings,
 			storeFor: (profile) => S3ObjectStore.for(profile, { http: obsidianHttp, secrets }),
+			registry,
 			attach: (reference, name) => attachments.of(reference, name),
 		});
 		const resolver = new Resolver({ storeFor: (id) => storages.storeFor(id), cache, objectUrls: browserObjectUrls });
 		const attachments = new Attachments({ resolver, recognizes: (id) => storages.recognizes(id) });
 
-		return new Depot(settings, storages, attachments, resolver, cache, (current) => plugin.saveData(current.toJSON()));
+		return new Depot(settings, storages, attachments, resolver, cache, registry, (current) =>
+			plugin.saveData(current.toJSON())
+		);
 	}
 
 	async save(): Promise<void> {
@@ -44,11 +52,13 @@ export class Depot {
 
 	async clearCache(): Promise<void> {
 		await this.cache.clear();
+		await this.registry.clear();
 	}
 
 	release(): void {
 		this.resolver.release();
 		this.cache.close?.();
+		this.registry.close?.();
 	}
 }
 
@@ -58,5 +68,14 @@ async function openCache(name: string): Promise<ObjectCache & { close?(): void }
 	} catch (error) {
 		console.warn('[Depot] Persistent cache unavailable, using memory instead.', error);
 		return new MemoryObjectCache();
+	}
+}
+
+async function openRegistry(name: string): Promise<UploadRegistry & { close?(): void }> {
+	try {
+		return await IndexedDbUploadRegistry.open(name);
+	} catch (error) {
+		console.warn('[Depot] Persistent upload registry unavailable, using memory instead.', error);
+		return new MemoryUploadRegistry();
 	}
 }
