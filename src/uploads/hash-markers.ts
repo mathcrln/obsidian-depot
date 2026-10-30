@@ -29,6 +29,6 @@ export class HashMarkers {
 	}
 
 	async record(hash: string, key: string): Promise<void> {
-		await this.store.put(HashMarkers.keyFor(hash), new TextEncoder().encode(key).buffer as ArrayBuffer, 'text/plain');
+		await this.store.put(HashMarkers.keyFor(hash), new TextEncoder().encode(key).buffer, 'text/plain');
 	}
 }

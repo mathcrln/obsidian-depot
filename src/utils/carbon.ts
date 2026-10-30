@@ -19,7 +19,7 @@ export const Carbon = {
 			date.setHours(0, 0, 0, 0);
 
 			if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) {
-				throw new RangeError('Invalid calendar date: ' + value);
+				throw new RangeError('Invalid calendar date: ' + String(value));
 			}
 		} else {
 			date = new Date(value instanceof Date ? value.getTime() : value);

@@ -22,7 +22,7 @@ export const Str = {
 		return value.split(/\s+/).filter(Boolean);
 	},
 
-	compare(a: string, b: string): number {
+	compare(this: void, a: string, b: string): number {
 		return a < b ? -1 : a > b ? 1 : 0;
 	},
 
