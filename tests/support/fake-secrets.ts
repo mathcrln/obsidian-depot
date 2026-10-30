@@ -1,4 +1,4 @@
-import type { Secrets } from '@/settings/secrets';
+import type { Secrets } from '@/platform/secrets';
 
 export class FakeSecrets implements Secrets {
 	constructor(private readonly values: Record<string, string> = {}) {}

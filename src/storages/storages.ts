@@ -1,6 +1,6 @@
 import type { AttachmentReference } from '@/references/attachment-reference';
 import { ProfileId } from '@/references/profile-id';
-import type { ProfileSettings, Settings } from '@/settings/settings';
+import type { ProfileSettings, Settings } from '@/models/plugin-settings';
 import type { ObjectStore } from '@/storages/object-store';
 import { Profile } from '@/storages/profile';
 import type { UploadRegistry } from '@/uploads/upload-registry';

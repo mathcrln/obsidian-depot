@@ -22,7 +22,7 @@
 - 🔒 Store images and files in your own private S3 or Cloudflare R2 bucket, not in your vault
 - 🔗 Notes keep a clean link such as `mybucket://photo.jpg`: no public URLs, no expiring tokens
 - 📋 Paste, drag and drop, or pick a file, and it is uploaded and linked
-- 🖼️ Images show in Reading view, Live Preview, and Bases card covers
+- 🖼️ Images show in Reading view, Live Preview, and Bases card covers (covers are best effort, since Obsidian doesn't offer an API for them yet)
 - 📄 PDF, audio, and video embeds
 - ⚡ Cached on your device, so attachments load instantly and work offline
 - 🗂️ Several storage profiles (personal, work, public…), each with its own bucket

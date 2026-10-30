@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Settings } from '@/settings/settings';
-import type { ProfileSettings } from '@/settings/settings';
+import { Settings } from '@/models/plugin-settings';
+import type { ProfileSettings } from '@/models/plugin-settings';
 import { NoDefaultProfile, ProfileDeleted, UnknownProfile } from '@/storages/profile-errors';
 import type { ObjectStore } from '@/storages/object-store';
 import { Storages } from '@/storages/storages';

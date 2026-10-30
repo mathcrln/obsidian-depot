@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AwsV4Signer } from 'aws4fetch';
-import type { ProfileSettings } from '@/settings/settings';
+import type { ProfileSettings } from '@/models/plugin-settings';
 import {
 	AccessDenied,
 	MissingCredentials,

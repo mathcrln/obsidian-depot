@@ -1,12 +1,11 @@
 import { Plugin } from 'obsidian';
-import { registerClearCacheCommand } from '@/commands/clear-cache';
-import { registerUploadCommand } from '@/commands/upload-attachment';
+import { Commands } from '@/commands/commands';
 import { Depot } from '@/depot';
-import { registerLibrary } from '@/library/register-library';
-import { registerPasteAndDrop } from '@/editor/paste-and-drop';
-import { registerLivePreview } from '@/rendering/live-preview';
-import { registerReadingView } from '@/rendering/reading-view';
-import { DepotSettingTab } from '@/settings/setting-tab';
+import { BasesCovers } from '@/integrations/bases-covers';
+import { WorkspaceObserver } from '@/integrations/workspace-observer';
+import { NoteAttachments } from '@/integrations/note-attachments';
+import { registerLibrary } from '@/ui/library/register-library';
+import { DepotSettingTab } from '@/ui/settings/setting-tab';
 
 export default class DepotPlugin extends Plugin {
 	depot!: Depot;
@@ -15,12 +14,11 @@ export default class DepotPlugin extends Plugin {
 		this.depot = await Depot.boot(this);
 
 		this.addSettingTab(new DepotSettingTab(this));
-		registerUploadCommand(this);
-		registerClearCacheCommand(this);
-		registerPasteAndDrop(this);
-		registerReadingView(this);
-		registerLivePreview(this);
 		registerLibrary(this);
+		Commands.register(this);
+		const observer = this.addChild(new WorkspaceObserver(this.app.workspace));
+		this.addChild(new NoteAttachments(this, this.depot, observer));
+		this.addChild(new BasesCovers(this, this.depot, observer));
 	}
 
 	onunload() {

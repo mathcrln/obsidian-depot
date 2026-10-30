@@ -1,6 +1,6 @@
 import { AwsV4Signer } from 'aws4fetch';
-import type { ProfileSettings } from '@/settings/settings';
-import type { Secrets } from '@/settings/secrets';
+import type { ProfileSettings } from '@/models/plugin-settings';
+import type { Secrets } from '@/platform/secrets';
 import { parseListObjectsResponse } from './list-objects-response';
 import type { Http, HttpRequest, HttpResponse } from './http';
 import {
