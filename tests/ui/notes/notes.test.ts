@@ -1,23 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Notes } from '@/ui/notes/notes';
 import type { UploadableFile } from '@/storages/profile';
-
-const notices = vi.hoisted(() => [] as Array<{ text: string; hidden: boolean }>);
-vi.mock('obsidian', () => ({
-	Notice: class Notice {
-		readonly state: { text: string; hidden: boolean };
-		constructor(text: string) {
-			this.state = { text, hidden: false };
-			notices.push(this.state);
-		}
-		hide(): void {
-			this.state.hidden = true;
-		}
-	},
-}));
-beforeEach(() => {
-	notices.splice(0);
-});
+import { notices } from '../../support/obsidian';
 
 describe('Notes', () => {
 	it('uploads a batch into a bound note with one reference per line', async () => {

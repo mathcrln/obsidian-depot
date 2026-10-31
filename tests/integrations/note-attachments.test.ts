@@ -1,184 +1,154 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Plugin, TFile } from 'obsidian';
 import { Notes } from '@/ui/notes/notes';
 import { NoteAttachments } from '@/integrations/note-attachments';
 import type { Depot } from '@/depot';
 import type { WorkspaceObserver } from '@/integrations/workspace-observer';
+import { FakeWorkspaceObserver } from '../support/setup';
 import type { UploadFile } from '@/actions/upload-attachments';
 import type { InsertableAttachment } from '@/ui/notes/note-editor';
 import type { UploadableFile } from '@/storages/profile';
+import { AttachmentReference } from '@/references/attachment-reference';
+import { Events, notices } from '../support/obsidian';
 
-const notices = vi.hoisted(() => [] as Array<{ text: string; hidden: boolean }>);
-const postProcessors = vi.hoisted(() => new Set<unknown>());
-vi.mock('obsidian', () => ({
-	Notice: class Notice {
-		readonly state: { text: string; hidden: boolean };
-		constructor(text: string) {
-			this.state = { text, hidden: false };
-			notices.push(this.state);
-		}
-		hide(): void {
-			this.state.hidden = true;
-		}
-	},
-	Component: class {
-		private readonly disposers: Array<() => void> = [];
-		load(): void {
-			this.onload();
-		}
-		unload(): void {
-			this.onunload();
-			for (const dispose of this.disposers.splice(0)) dispose();
-		}
-		onload(): void {}
-		onunload(): void {}
-		register(dispose: () => void): void {
-			this.disposers.push(dispose);
-		}
-		registerEvent(ref: { unload: () => void }): void {
-			this.register(() => ref.unload());
-		}
-	},
-}));
-
-beforeEach(() => {
-	notices.splice(0);
-	postProcessors.clear();
-});
-afterEach(() => vi.unstubAllGlobals());
+const EDITOR_EVENTS = [
+	{ name: 'paste', event: 'editor-paste', transfer: 'clipboardData' },
+	{ name: 'drop', event: 'editor-drop', transfer: 'dataTransfer' },
+] as const;
 
 describe('NoteAttachments', () => {
-	it('does not register listeners in its constructor', () => {
-		const plugin = GivenPlugin();
+	it('does not listen before it is loaded', () => {
+		const fixture = GivenNoteAttachments();
 
-		new NoteAttachments(
-			plugin.value,
-			GivenDepot(GivenUpload([])),
-			new FakeWorkspaceObserver() as unknown as WorkspaceObserver
-		);
-
-		expect(plugin.events).not.toHaveBeenCalled();
-		expect(postProcessors.size).toBe(0);
+		expect(fixture.workspace.listeners()).toBe(0);
+		expect(fixture.postProcessors).toHaveLength(0);
+		expect(fixture.observer.subscribers).toBe(0);
 	});
 
-	it.each([
-		{ name: 'paste', eventName: 'editor-paste', transfer: 'clipboardData' },
-		{ name: 'drop', eventName: 'editor-drop', transfer: 'dataTransfer' },
-	] as const)('uploads a $name into the current note', async ({ eventName, transfer }) => {
-		const inserted: string[] = [];
-		const uploads: string[] = [];
-		const fixture = GivenNoteAttachments(GivenUpload(uploads));
-		const editor = { replaceSelection: (markdown: string) => inserted.push(markdown) };
-		const note = GivenNote('My note');
-		const event = GivenEditorEvent(transfer, [GivenFile(`${eventName}.png`)]);
+	it.each(EDITOR_EVENTS)('uploads a $name into the current note', async ({ event, transfer }) => {
+		const fixture = GivenLoadedNoteAttachments();
 
-		fixture.events.get(eventName)?.(event.value, editor, { file: note });
+		const editorEvent = WhenEditorEvent(fixture, event, transfer, [GivenFile(`${event}.png`)]);
 
-		expect(event.preventDefault).toHaveBeenCalledOnce();
-		await vi.waitFor(() => expect(inserted).toEqual([`s3://${eventName}.png`]));
-		expect(uploads).toEqual([`${eventName}.png:My note`]);
-		expect(notices).toEqual([{ text: `Uploading ${eventName}.png…`, hidden: true }]);
-		fixture.component.unload();
+		expect(editorEvent.defaultPrevented).toBe(true);
+		await vi.waitFor(() => expect(fixture.inserted).toEqual([`s3://${event}.png`]));
+		expect(fixture.uploads).toEqual([`${event}.png:My note`]);
+		expect(notices).toEqual([{ text: `Uploading ${event}.png…`, hidden: true }]);
 	});
 
-	it.each([
-		{ name: 'paste', eventName: 'editor-paste', transfer: 'clipboardData' },
-		{ name: 'drop', eventName: 'editor-drop', transfer: 'dataTransfer' },
-	] as const)('leaves an already handled $name event alone', ({ eventName, transfer }) => {
-		const uploads: string[] = [];
-		const fixture = GivenNoteAttachments(GivenUpload(uploads));
-		const event = GivenEditorEvent(transfer, [GivenFile('image.png')], true);
+	it.each(EDITOR_EVENTS)('leaves an already handled $name alone', ({ event, transfer }) => {
+		const fixture = GivenLoadedNoteAttachments();
 
-		fixture.events.get(eventName)?.(event.value, { replaceSelection: () => {} }, { file: GivenNote('Note') });
+		WhenEditorEvent(fixture, event, transfer, [GivenFile('image.png')], { handled: true });
 
-		expect(event.preventDefault).not.toHaveBeenCalled();
-		expect(uploads).toEqual([]);
-		fixture.component.unload();
+		expect(fixture.uploads).toEqual([]);
 	});
 
-	it.each([
-		{ name: 'paste', eventName: 'editor-paste', transfer: 'clipboardData' },
-		{ name: 'drop', eventName: 'editor-drop', transfer: 'dataTransfer' },
-	] as const)('ignores a $name with no files', ({ eventName, transfer }) => {
-		const uploads: string[] = [];
-		const fixture = GivenNoteAttachments(GivenUpload(uploads));
-		const event = GivenEditorEvent(transfer, []);
+	it.each(EDITOR_EVENTS)('ignores a $name with no files', ({ event, transfer }) => {
+		const fixture = GivenLoadedNoteAttachments();
 
-		fixture.events.get(eventName)?.(event.value, { replaceSelection: () => {} }, { file: GivenNote('Note') });
+		const editorEvent = WhenEditorEvent(fixture, event, transfer, []);
 
-		expect(event.preventDefault).not.toHaveBeenCalled();
-		expect(uploads).toEqual([]);
-		fixture.component.unload();
+		expect(editorEvent.defaultPrevented).toBe(false);
+		expect(fixture.uploads).toEqual([]);
 	});
 
-	it('renders attachments in elements reported by the workspace observer', () => {
-		const fixture = GivenNoteAttachments(GivenUpload([]));
-		const added = new FakeElement();
+	it('stops handling pastes once unloaded', () => {
+		const fixture = GivenUnloadedNoteAttachments();
 
-		fixture.observer.render(added as unknown as HTMLElement);
+		WhenEditorEvent(fixture, 'editor-paste', 'clipboardData', [GivenFile('late.png')]);
 
-		expect(added.querySelectorAll).toHaveBeenCalledTimes(3);
-		fixture.component.unload();
+		expect(fixture.uploads).toEqual([]);
+	});
+
+	it('renders attachments in live preview elements reported by the workspace observer', async () => {
+		const fixture = GivenLoadedNoteAttachments();
+		const image = GivenEmbed('personal://photo.png');
+
+		WhenLivePreviewShows(fixture, image);
+
+		await vi.waitFor(() => expect(image.getAttribute('src')).toBe('blob:personal://photo.png'));
+	});
+
+	it('renders attachments in reading view', async () => {
+		const fixture = GivenLoadedNoteAttachments();
+		const image = GivenEmbed('personal://photo.png');
+
+		WhenReadingViewShows(fixture, image);
+
+		await vi.waitFor(() => expect(image.getAttribute('src')).toBe('blob:personal://photo.png'));
+	});
+
+	it('leaves links of unknown profiles alone', () => {
+		const fixture = GivenLoadedNoteAttachments();
+		const image = GivenEmbed('https://example.com/photo.png');
+
+		WhenReadingViewShows(fixture, image);
+
+		expect(image.getAttribute('src')).toBe('https://example.com/photo.png');
+		expect(image.dataset.depot).toBeUndefined();
 	});
 
 	it('stops listening to the workspace observer when unloaded', () => {
-		const fixture = GivenNoteAttachments(GivenUpload([]));
-		expect(fixture.observer.subscribers).toBe(1);
+		const fixture = GivenLoadedNoteAttachments();
 
 		fixture.component.unload();
 
 		expect(fixture.observer.subscribers).toBe(0);
 	});
-
-	it('renders attachments in reading view through the plugin post processor', () => {
-		const fixture = GivenNoteAttachments(GivenUpload([]));
-		const processor = [...postProcessors][0] as (element: HTMLElement) => void;
-
-		processor(fixture.root as unknown as HTMLElement);
-
-		expect(postProcessors.size).toBe(1);
-		expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(3);
-		fixture.component.unload();
-	});
 });
 
-function GivenPlugin() {
-	const events = vi.fn();
-	return {
-		value: { app: { workspace: { on: events } } } as unknown as Plugin,
-		events,
-	};
+function GivenLoadedNoteAttachments() {
+	const fixture = GivenNoteAttachments();
+	fixture.component.load();
+
+	return fixture;
 }
 
-function GivenNoteAttachments(upload: UploadFile<InsertableAttachment>) {
-	const callbacks = new Map<string, EditorEventHandler>();
-	const root = new FakeElement();
-	const unsubscribe = vi.fn();
+function GivenUnloadedNoteAttachments() {
+	const fixture = GivenLoadedNoteAttachments();
+	fixture.component.unload();
+
+	return fixture;
+}
+
+function GivenNoteAttachments() {
+	const uploads: string[] = [];
+	const inserted: string[] = [];
+	const workspace = new Events();
+	const postProcessors: Array<(element: HTMLElement) => void> = [];
 	const plugin = {
-		app: {
-			workspace: {
-				on: (name: string, callback: EditorEventHandler) => {
-					callbacks.set(name, callback);
-					return { unload: unsubscribe };
-				},
-			},
-		},
-		registerMarkdownPostProcessor: (processor: unknown) => postProcessors.add(processor),
+		app: { workspace },
+		registerMarkdownPostProcessor: (processor: (element: HTMLElement) => void) => postProcessors.push(processor),
 	};
 	const observer = new FakeWorkspaceObserver();
-	vi.stubGlobal('HTMLElement', FakeElement);
 	const component = new NoteAttachments(
 		plugin as unknown as Plugin,
-		GivenDepot(upload),
+		GivenDepot(GivenUpload(uploads)),
 		observer as unknown as WorkspaceObserver
 	);
-	component.load();
+	const editor = { replaceSelection: (markdown: string) => inserted.push(markdown) };
+	onTestFinished(() => component.unload());
 
-	return { component, events: callbacks, observer, root };
+	return { component, workspace, postProcessors, observer, uploads, inserted, editor };
 }
 
 function GivenDepot(upload: UploadFile<InsertableAttachment>): Depot {
-	return { notes: new Notes(upload), attachments: { from: () => undefined } } as unknown as Depot;
+	const attachments = {
+		from(src: string) {
+			const reference = AttachmentReference.tryParse(src);
+			if (reference?.profile.value !== 'personal') return undefined;
+
+			return {
+				reference,
+				kind: 'image',
+				name: reference.key,
+				resolve: async () => ({ url: `blob:${reference.toString()}`, contentType: 'image/png' }),
+			};
+		},
+	};
+
+	return { notes: new Notes(upload), attachments } as unknown as Depot;
 }
 
 function GivenUpload(uploads: string[]): UploadFile<InsertableAttachment> {
@@ -188,56 +158,35 @@ function GivenUpload(uploads: string[]): UploadFile<InsertableAttachment> {
 	};
 }
 
+function GivenEmbed(src: string): HTMLImageElement {
+	return document.body.createDiv().createEl('img', { attr: { src } });
+}
+
 function GivenFile(name: string): UploadableFile {
 	return { name, arrayBuffer: async () => new ArrayBuffer(0) };
 }
 
-function GivenNote(basename: string): Pick<TFile, 'basename'> {
-	return { basename };
+function WhenLivePreviewShows(fixture: ReturnType<typeof GivenNoteAttachments>, element: HTMLElement): void {
+	fixture.observer.render(element.parentElement as HTMLElement);
 }
 
-function GivenEditorEvent(transfer: 'clipboardData' | 'dataTransfer', files: UploadableFile[], defaultPrevented = false) {
-	const preventDefault = vi.fn();
-	const value = { [transfer]: { files }, defaultPrevented, preventDefault } as unknown as EditorEvent;
-	return { value, preventDefault };
+function WhenReadingViewShows(fixture: ReturnType<typeof GivenNoteAttachments>, element: HTMLElement): void {
+	for (const processor of fixture.postProcessors) processor(element.parentElement as HTMLElement);
 }
 
-type EditorEvent = {
-	clipboardData?: { files: UploadableFile[] } | null;
-	dataTransfer?: { files: UploadableFile[] } | null;
-	defaultPrevented: boolean;
-	preventDefault(): void;
-};
+function WhenEditorEvent(
+	fixture: ReturnType<typeof GivenNoteAttachments>,
+	name: 'editor-paste' | 'editor-drop',
+	transfer: 'clipboardData' | 'dataTransfer',
+	files: UploadableFile[],
+	{ handled = false }: { handled?: boolean } = {}
+): Event {
+	const event = new Event(name, { cancelable: true });
+	Object.defineProperty(event, transfer, { value: { files } });
+	if (handled) event.preventDefault();
+	const note = { basename: 'My note' } as Pick<TFile, 'basename'>;
 
-type EditorEventHandler = (
-	event: EditorEvent,
-	editor: { replaceSelection(markdown: string): void },
-	info: { file: Pick<TFile, 'basename'> | null }
-) => void;
+	fixture.workspace.trigger(name, event, fixture.editor, { file: note });
 
-class FakeWorkspaceObserver {
-	private renderer: ((element: HTMLElement) => void) | undefined;
-
-	get subscribers(): number {
-		return this.renderer ? 1 : 0;
-	}
-
-	subscribe(render: (element: HTMLElement) => void): () => void {
-		this.renderer = render;
-		return () => {
-			this.renderer = undefined;
-		};
-	}
-
-	render(element: HTMLElement): void {
-		this.renderer?.(element);
-	}
-}
-
-class FakeElement {
-	matches = vi.fn(() => false);
-	querySelectorAll = vi.fn(() => []);
-	instanceOf(): boolean {
-		return true;
-	}
+	return event;
 }

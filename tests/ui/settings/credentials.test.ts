@@ -1,62 +1,62 @@
 import { expect, it, vi } from 'vitest';
-import type { App, Setting, SettingGroup } from 'obsidian';
+import type { App } from 'obsidian';
 import { Profiles } from '@/actions/profiles';
 import { Settings } from '@/models/plugin-settings';
 import { credentialSettings } from '@/ui/settings/credentials';
+import { find, GivenSetting, WhenTyping } from '../../support/setup';
 
-vi.mock('obsidian', () => ({}));
+it('stores the trimmed credential in secret storage', () => {
+	const profile = GivenProfile('personal');
 
-it('stores credential values in secret storage and persists only their identifiers', () => {
+	WhenEnteringCredential(profile, 'Access key ID', ' secret-value ');
+
+	expect(profile.secrets).toEqual([{ id: 'depot-personal-access-key-id', value: 'secret-value' }]);
+});
+
+it('saves only the secret identifier in the plugin settings', () => {
+	const profile = GivenProfile('personal');
+
+	WhenEnteringCredential(profile, 'Access key ID', ' secret-value ');
+
+	expect(profile.settings.profile('personal')?.accessKeySecret).toBe('depot-personal-access-key-id');
+	expect(JSON.stringify(profile.settings.toJSON())).not.toContain('secret-value');
+	expect(profile.save).toHaveBeenCalledOnce();
+});
+
+it('masks credential inputs', () => {
+	const profile = GivenProfile('personal');
+
+	const input = WhenShowingCredential(profile, 'Secret access key');
+
+	expect(input.type).toBe('password');
+});
+
+function GivenProfile(id: string) {
 	const settings = Settings.empty();
-	settings.addProfile('personal');
-	const stored: Array<{ id: string; value: string }> = [];
+	settings.addProfile(id);
+	const secrets: Array<{ id: string; value: string }> = [];
 	const app = {
 		secretStorage: {
 			getSecret: () => null,
-			setSecret: (id: string, value: string) => stored.push({ id, value }),
+			setSecret: (secretId: string, value: string) => secrets.push({ id: secretId, value }),
 		},
 	} as unknown as App;
 	const save = vi.fn(async () => {});
-	const profiles = new Profiles({ app, settings, save });
-	const group = credentialSettings('personal', { app, settings: () => settings, profiles, refresh: () => {} });
-	const field = 'type' in group && group.type === 'group' ? group.items?.[0] : undefined;
-	const setting = new FakeSetting();
 
-	if (field === undefined || !('render' in field) || field.render === undefined)
-		throw new Error('Credential field is missing.');
-	field.render(setting as unknown as Setting, {} as SettingGroup);
-	setting.change?.(' secret-value ');
-
-	expect(stored).toEqual([{ id: 'depot-personal-access-key-id', value: 'secret-value' }]);
-	expect(settings.profile('personal')?.accessKeySecret).toBe('depot-personal-access-key-id');
-	expect(JSON.stringify(settings.toJSON())).not.toContain('secret-value');
-	expect(save).toHaveBeenCalledOnce();
-});
-
-class FakeSetting {
-	change: ((value: string) => void) | undefined;
-	setName(): this {
-		return this;
-	}
-	setDesc(): this {
-		return this;
-	}
-	addText(configure: (text: FakeText) => void): this {
-		const text = new FakeText();
-		configure(text);
-		this.change = text.change;
-		return this;
-	}
+	return { id, app, settings, secrets, save, profiles: new Profiles({ app, settings, save }) };
 }
 
-class FakeText {
-	inputEl = { type: '', addEventListener: () => {} };
-	change: ((value: string) => void) | undefined;
-	setPlaceholder(): this {
-		return this;
-	}
-	onChange(callback: (value: string) => void): this {
-		this.change = callback;
-		return this;
-	}
+function WhenShowingCredential(profile: ReturnType<typeof GivenProfile>, name: string): HTMLInputElement {
+	const group = credentialSettings(profile.id, {
+		app: profile.app,
+		settings: () => profile.settings,
+		profiles: profile.profiles,
+		refresh: () => {},
+	});
+
+	return find<HTMLInputElement>(GivenSetting(group, name).controlEl, 'input');
+}
+
+function WhenEnteringCredential(profile: ReturnType<typeof GivenProfile>, name: string, value: string): void {
+	WhenTyping(WhenShowingCredential(profile, name), value);
 }

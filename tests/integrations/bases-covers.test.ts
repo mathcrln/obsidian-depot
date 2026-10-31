@@ -1,210 +1,178 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { TFile, type Plugin } from 'obsidian';
 import { BasesCovers } from '@/integrations/bases-covers';
 import type { Depot } from '@/depot';
 import type { WorkspaceObserver } from '@/integrations/workspace-observer';
+import { FakeWorkspaceObserver } from '../support/setup';
 
-vi.mock('obsidian', () => ({
-	TFile: class TFile {},
-	Component: class {
-		private readonly disposers: Array<() => void> = [];
-		load(): void {
-			this.onload();
-		}
-		unload(): void {
-			this.onunload();
-			for (const dispose of this.disposers.splice(0)) dispose();
-		}
-		onload(): void {}
-		onunload(): void {}
-		register(dispose: () => void): void {
-			this.disposers.push(dispose);
-		}
-	},
-}));
+it('does not watch the workspace before it is loaded', () => {
+	const fixture = GivenBasesCovers();
 
-const originalHTMLElement = globalThis.HTMLElement;
-afterEach(() => {
-	globalThis.HTMLElement = originalHTMLElement;
+	expect(fixture.observer.subscribers).toBe(0);
 });
 
-it('subscribes on load and unsubscribes on unload', () => {
-	const fixture = GivenBasesCovers(new FakeRoot() as unknown as HTMLElement, new Map(), GivenAttachment([]));
-	expect(fixture.observer.subscribers).toBe(0);
+it('watches the workspace once loaded', () => {
+	const fixture = GivenBasesCovers();
 
 	fixture.component.load();
+
 	expect(fixture.observer.subscribers).toBe(1);
+});
+
+it('stops watching the workspace once unloaded', () => {
+	const fixture = GivenLoadedBasesCovers();
 
 	fixture.component.unload();
+
 	expect(fixture.observer.subscribers).toBe(0);
 });
 
-it('renders a Bases cover when the cover itself is the scan root', async () => {
-	const note = GivenNote('Notes/One.md');
-	const cover = GivenCover(() => note.path);
-	const resolutions: Array<(value: { url: string }) => void> = [];
-	const fixture = GivenBasesCovers(cover as unknown as HTMLElement, new Map([[note.path, note]]), GivenAttachment(resolutions));
-	fixture.component.load();
-	fixture.observer.render(cover as unknown as HTMLElement);
-	expect(resolutions).toHaveLength(1);
+it('shows the cover image of the card note', async () => {
+	const card = GivenCard('Notes/One.md');
+	const fixture = GivenLoadedBasesCovers();
 
-	resolutions[0]?.({ url: 'blob:cover' });
-	await vi.waitFor(() => expect(cover.style.backgroundImage).toBe('url("blob:cover")'));
-	expect(cover.dataset.depot).toBe('loaded');
-	fixture.component.unload();
+	WhenObserved(fixture, card.root);
+	WhenCoverLoads(fixture, 0, 'blob:cover');
+
+	await vi.waitFor(() => expect(card.cover.style.backgroundImage).toBe('url("blob:cover")'));
+	expect(card.cover.dataset.depot).toBe('loaded');
 });
 
-it('keeps a recycled cover on the new note when an older image resolves later', async () => {
-	const firstNote = GivenNote('Notes/One.md');
-	const nextNote = GivenNote('Notes/Two.md');
-	let path = firstNote.path;
-	const cover = GivenCover(() => path);
-	const resolutions: Array<(value: { url: string }) => void> = [];
-	const fixture = GivenBasesCovers(
-		cover as unknown as HTMLElement,
-		new Map([
-			[firstNote.path, firstNote],
-			[nextNote.path, nextNote],
-		]),
-		GivenAttachment(resolutions)
-	);
-	fixture.component.load();
-	fixture.observer.render(cover as unknown as HTMLElement);
-	path = nextNote.path;
-	fixture.observer.render(cover as unknown as HTMLElement);
-	resolutions[0]?.({ url: 'blob:old-note' });
-	await Promise.resolve();
-	expect(cover.style.backgroundImage).toBe('');
-	resolutions[1]?.({ url: 'blob:new-note' });
-	await vi.waitFor(() => expect(cover.style.backgroundImage).toBe('url("blob:new-note")'));
-	expect(cover.dataset.depot).toBe('loaded');
-	fixture.component.unload();
+it('renders a cover reported on its own', async () => {
+	const card = GivenCard('Notes/One.md');
+	const fixture = GivenLoadedBasesCovers();
+
+	WhenObserved(fixture, card.cover);
+	WhenCoverLoads(fixture, 0, 'blob:cover');
+
+	await vi.waitFor(() => expect(card.cover.style.backgroundImage).toBe('url("blob:cover")'));
 });
 
-it('retries the same pending cover after the component is mounted again', async () => {
-	const note = GivenNote('Notes/One.md');
-	const cover = GivenCover(() => note.path);
-	const resolutions: Array<(value: { url: string }) => void> = [];
-	const notes = new Map([[note.path, note]]);
-	const attachment = GivenAttachment(resolutions);
-	const first = GivenBasesCovers(cover as unknown as HTMLElement, notes, attachment);
-	first.component.load();
-	first.observer.render(cover as unknown as HTMLElement);
+it('marks a cover that fails to load', async () => {
+	const card = GivenCard('Notes/One.md');
+	const fixture = GivenLoadedBasesCovers();
+
+	WhenObserved(fixture, card.root);
+	WhenCoverFails(fixture, 0, 'Access denied');
+
+	await vi.waitFor(() => expect(card.cover.dataset.depot).toBe('failed'));
+	expect(card.cover.hasClass('depot-cover-failed')).toBe(true);
+	expect(card.cover.getAttribute('aria-label')).toBe('Access denied');
+});
+
+it('keeps a recycled cover on the new note when the old image loads later', async () => {
+	const card = GivenRecycledCard('Notes/One.md', 'Notes/Two.md');
+
+	WhenCoverLoads(card.fixture, 1, 'blob:new-note');
+	WhenCoverLoads(card.fixture, 0, 'blob:old-note');
+
+	await vi.waitFor(() => expect(card.cover.style.backgroundImage).toBe('url("blob:new-note")'));
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(card.cover.style.backgroundImage).toBe('url("blob:new-note")');
+});
+
+it('ignores a cover that loads after its renderer was unloaded', async () => {
+	const card = GivenCard('Notes/One.md');
+	const fixture = GivenLoadedBasesCovers();
+	WhenObserved(fixture, card.root);
+	fixture.component.unload();
+
+	WhenCoverLoads(fixture, 0, 'blob:stale');
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	expect(card.cover.style.backgroundImage).toBe('');
+});
+
+it('retries a cover left pending by an unloaded renderer', async () => {
+	const card = GivenCard('Notes/One.md');
+	const first = GivenLoadedBasesCovers();
+	WhenObserved(first, card.root);
 	first.component.unload();
+	const second = GivenLoadedBasesCovers();
 
-	const second = GivenBasesCovers(cover as unknown as HTMLElement, notes, attachment);
-	second.component.load();
-	second.observer.render(cover as unknown as HTMLElement);
-	expect(resolutions).toHaveLength(2);
-	resolutions[0]?.({ url: 'blob:stale' });
-	await Promise.resolve();
-	expect(cover.style.backgroundImage).toBe('');
-	resolutions[1]?.({ url: 'blob:fresh' });
-	await vi.waitFor(() => expect(cover.style.backgroundImage).toBe('url("blob:fresh")'));
-	second.component.unload();
+	WhenObserved(second, card.root);
+	WhenCoverLoads(second, 0, 'blob:fresh');
+
+	await vi.waitFor(() => expect(card.cover.style.backgroundImage).toBe('url("blob:fresh")'));
 });
 
-function GivenBasesCovers(root: HTMLElement, notes: Map<string, TFile>, attachment: ImageAttachment) {
-	globalThis.HTMLElement = FakeCover as unknown as typeof HTMLElement;
-	const observer = new FakeWorkspaceObserver();
+it('leaves a card alone when its note has no Depot cover', () => {
+	const card = GivenCard('Notes/One.md');
+	const fixture = GivenLoadedBasesCovers({ covers: false });
+
+	WhenObserved(fixture, card.root);
+
+	expect(card.cover.dataset.depot).toBeUndefined();
+	expect(fixture.resolutions).toHaveLength(0);
+});
+
+function GivenLoadedBasesCovers(options: { covers?: boolean } = {}) {
+	const fixture = GivenBasesCovers(options);
+	fixture.component.load();
+
+	return fixture;
+}
+
+function GivenRecycledCard(from: string, to: string) {
+	const card = GivenCard(from);
+	const fixture = GivenLoadedBasesCovers();
+	WhenObserved(fixture, card.root);
+	card.root.setAttribute('data-path', to);
+	WhenObserved(fixture, card.root);
+
+	return { ...card, fixture };
+}
+
+function GivenBasesCovers({ covers = true }: { covers?: boolean } = {}) {
+	const notes = ['Notes/One.md', 'Notes/Two.md'];
+	const files = new Map(notes.map((path) => [path, Object.assign(new TFile(), { path })]));
+	const resolutions: Array<(value: { url: string }) => void> = [];
+	const failures: Array<(error: Error) => void> = [];
+	const attachment = {
+		kind: 'image',
+		resolve: () =>
+			new Promise((resolve, reject) => {
+				resolutions.push(resolve);
+				failures.push(reject);
+			}),
+	};
 	const plugin = {
 		app: {
-			workspace: { containerEl: root },
-			vault: { getAbstractFileByPath: (path: string) => notes.get(path) ?? null },
+			vault: { getAbstractFileByPath: (path: string) => files.get(path) ?? null },
 			metadataCache: {
-				getFileCache: () => ({ frontmatter: { cover: 'cover.png' } }),
+				getFileCache: () => ({ frontmatter: { cover: 'personal://cover.png' } }),
 				getFirstLinkpathDest: () => null,
 			},
 		},
 	};
-	const depot = { attachments: { within: () => [attachment] } };
+	const depot = { attachments: { within: () => (covers ? [attachment] : []) } };
+	const observer = new FakeWorkspaceObserver();
 	const component = new BasesCovers(
 		plugin as unknown as Plugin,
 		depot as unknown as Depot,
 		observer as unknown as WorkspaceObserver
 	);
-	return { component, observer };
+
+	onTestFinished(() => component.unload());
+
+	return { component, observer, resolutions, failures };
 }
 
-function GivenAttachment(resolutions: Array<(value: { url: string }) => void>): ImageAttachment {
-	return {
-		kind: 'image',
-		resolve: () => new Promise((resolve) => resolutions.push(resolve)),
-	};
+function GivenCard(path: string) {
+	const root = document.body.createDiv({ cls: 'bases-cards-item', attr: { 'data-path': path } });
+	const cover = root.createDiv({ cls: 'bases-cards-cover' });
+
+	return { root, cover };
 }
 
-function GivenNote(path: string): TFile {
-	return Object.assign(new TFile(), { path });
+function WhenObserved(fixture: ReturnType<typeof GivenBasesCovers>, element: HTMLElement): void {
+	fixture.observer.render(element);
 }
 
-function GivenCover(path: () => string): FakeCover {
-	return new FakeCover(path);
+function WhenCoverLoads(fixture: ReturnType<typeof GivenBasesCovers>, request: number, url: string): void {
+	fixture.resolutions[request]?.({ url });
 }
 
-type ImageAttachment = {
-	kind: 'image';
-	resolve(): Promise<{ url: string }>;
-};
-
-class FakeWorkspaceObserver {
-	private renderer: ((element: HTMLElement) => void) | undefined;
-
-	get subscribers(): number {
-		return this.renderer ? 1 : 0;
-	}
-
-	subscribe(render: (element: HTMLElement) => void): () => void {
-		this.renderer = render;
-		return () => {
-			this.renderer = undefined;
-		};
-	}
-
-	render(element: HTMLElement): void {
-		this.renderer?.(element);
-	}
-}
-
-class FakeRoot {
-	matches = vi.fn(() => false);
-	querySelectorAll = vi.fn(() => []);
-}
-
-class FakeCover {
-	dataset: Record<string, string> = {};
-	style = {
-		backgroundImage: '',
-		removeProperty: (property: string) => {
-			if (property === 'background-image') this.style.backgroundImage = '';
-		},
-	};
-	childElementCount = 0;
-	querySelectorAll = vi.fn(() => []);
-	addClass = vi.fn();
-	setAttribute = vi.fn();
-	private readonly card: { innerText: string; getAttribute(name: string): string | null; querySelector(): null };
-
-	constructor(path: () => string) {
-		this.card = {
-			innerText: '',
-			getAttribute: (name) => (name === 'data-path' ? path() : null),
-			querySelector: () => null,
-		};
-	}
-
-	matches(selector: string): boolean {
-		return selector === '.bases-cards-cover';
-	}
-
-	closest(): HTMLElement {
-		return this.card as unknown as HTMLElement;
-	}
-
-	get parentElement(): HTMLElement {
-		return this.card as unknown as HTMLElement;
-	}
-
-	instanceOf(constructor: typeof HTMLElement): boolean {
-		return constructor === (FakeCover as unknown as typeof HTMLElement);
-	}
+function WhenCoverFails(fixture: ReturnType<typeof GivenBasesCovers>, request: number, message: string): void {
+	fixture.failures[request]?.(new Error(message));
 }

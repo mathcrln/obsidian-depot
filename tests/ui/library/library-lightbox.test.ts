@@ -1,202 +1,108 @@
-import { expect, it, vi } from 'vitest';
-import type { App } from 'obsidian';
+import { expect, it, onTestFinished } from 'vitest';
+import type { App, MarkdownView } from 'obsidian';
 import type { Depot } from '@/depot';
 import type { LibraryItem } from '@/library/library-item';
 import { LibraryLightbox } from '@/ui/library/library-lightbox';
-
-vi.mock('obsidian', () => ({
-	Component: class Component {
-		cleanups: Array<() => void> = [];
-		register(cleanup: () => void): void {
-			this.cleanups.push(cleanup);
-		}
-		registerDomEvent(element: FakeElement, type: string, callback: EventListener): void {
-			element.addEventListener(type, callback);
-			this.register(() => element.removeEventListener(type, callback));
-		}
-		load(): void {}
-		unload(): void {
-			this.cleanups.splice(0).forEach((cleanup) => cleanup());
-		}
-	},
-	Modal: class Modal {
-		contentEl = new FakeElement();
-		modalEl = new FakeElement();
-		titleEl = new FakeElement();
-		scope = new FakeScope();
-		constructor(readonly app: unknown) {}
-		open(): void {
-			(this as unknown as { onOpen: () => void }).onOpen();
-		}
-		close(): void {
-			(this as unknown as { onClose: () => void }).onClose();
-		}
-	},
-	Notice: class Notice {},
-	setIcon: () => {},
-}));
+import type { Scope } from '../../support/obsidian';
+import { buttonNamed, find, WhenClicking } from '../../support/setup';
 
 it('navigates the supplied visible snapshot and updates the current item', () => {
-	const fixture = GivenLightbox();
+	const fixture = GivenOpenLightbox();
 	fixture.visible.splice(1, 1, fixture.third);
-	fixture.content.findAttribute('aria-label', 'Next file').dispatch('click');
+
+	WhenClickingNext(fixture.lightbox);
 
 	expect(fixture.changed).toEqual([fixture.first, fixture.second]);
-	expect(fixture.content.findClass('depot-library-lightbox-name').textContent).toBe('second.pdf');
-	expect(fixture.content.findClass('depot-library-lightbox-facts').textContent).toBe('2 of 2');
-	fixture.lightbox.close();
+	expect(find(fixture.lightbox.contentEl, '.depot-library-lightbox-name').textContent).toBe('second.pdf');
+	expect(find(fixture.lightbox.contentEl, '.depot-library-lightbox-facts').textContent).toBe('2 of 2');
 });
 
-it('releases an item action listener when navigation changes the item', () => {
-	const fixture = GivenLightbox();
-	const oldInsert = fixture.content.findClass('depot-library-actions').children[1];
-	fixture.content.findAttribute('aria-label', 'Next file').dispatch('click');
+it('navigates with the arrow keys', () => {
+	const fixture = GivenOpenLightbox();
 
-	expect(oldInsert?.listeners.get('click')?.size).toBe(0);
-	fixture.lightbox.close();
+	WhenPressing(fixture.lightbox, 'ArrowRight');
+	WhenPressing(fixture.lightbox, 'ArrowLeft');
+
+	expect(fixture.changed).toEqual([fixture.first, fixture.second, fixture.first]);
 });
 
-it('cleans navigation listeners across repeated close and open cycles', () => {
-	const fixture = GivenLightbox();
-	const firstNext = fixture.content.findAttribute('aria-label', 'Next file');
-	fixture.lightbox.close();
-	expect(firstNext.listeners.get('click')?.size).toBe(0);
+it('inserts only the current item after navigating', () => {
+	const fixture = GivenOpenLightbox();
+	const staleInsert = buttonNamed(fixture.lightbox.contentEl, 'Insert into note');
+	WhenClickingNext(fixture.lightbox);
 
-	fixture.lightbox.open();
-	const reopenedNext = fixture.content.findAttribute('aria-label', 'Next file');
-	expect(reopenedNext.listeners.get('click')?.size).toBe(1);
-	reopenedNext.dispatch('click');
-	fixture.lightbox.close();
+	WhenClicking(staleInsert);
+	WhenInserting(fixture.lightbox);
+
+	expect(fixture.inserted).toEqual(['second.pdf']);
+});
+
+it('navigates again once reopened', () => {
+	const fixture = GivenReopenedLightbox();
+
+	WhenClickingNext(fixture.lightbox);
 
 	expect(fixture.changed).toEqual([fixture.first, fixture.first, fixture.second]);
+});
+
+it('reports each dismissal', () => {
+	const fixture = GivenReopenedLightbox();
+
+	fixture.lightbox.close();
+
 	expect(fixture.dismissed).toEqual([true, true]);
 });
 
-function GivenLibraryItem(key: string): LibraryItem {
-	return { profile: 'personal', key, kind: 'pdf', status: 'used', notes: [] };
-}
-
-function GivenLightbox() {
+function GivenOpenLightbox() {
 	const first = GivenLibraryItem('first.pdf');
 	const second = GivenLibraryItem('second.pdf');
 	const third = GivenLibraryItem('third.pdf');
 	const visible = [first, second];
 	const changed: LibraryItem[] = [];
 	const dismissed: boolean[] = [];
+	const inserted: string[] = [];
 	const depot = {
-		attachments: {
-			of: () => ({ reference: { toString: () => 'personal://file' }, markdown: () => '![](personal://file)' }),
-		},
+		attachments: { of: (reference: { key: string }) => ({ reference, key: reference.key }) },
+		notes: { in: () => ({ insert: (attachment: { key: string }) => inserted.push(attachment.key) }) },
 	} as unknown as Depot;
+	const editor = { editor: {} } as unknown as MarkdownView;
 	const lightbox = new LibraryLightbox(
 		{} as unknown as App,
 		depot,
 		[...visible],
 		first,
-		() => undefined,
+		() => editor,
 		(item) => changed.push(item),
 		() => dismissed.push(true)
 	);
 	lightbox.open();
+	onTestFinished(() => {
+		if (lightbox.containerEl.isConnected) lightbox.close();
+	});
 
-	return { changed, content: lightbox.contentEl as unknown as FakeElement, dismissed, first, lightbox, second, third, visible };
+	return { changed, dismissed, inserted, first, lightbox, second, third, visible };
 }
 
-class FakeScope {
-	private readonly handlers = new Set<object>();
-	register(): object {
-		const handler = {};
-		this.handlers.add(handler);
-		return handler;
-	}
-	unregister(handler: object): void {
-		this.handlers.delete(handler);
-	}
+function GivenReopenedLightbox() {
+	const fixture = GivenOpenLightbox();
+	fixture.lightbox.close();
+	fixture.lightbox.open();
+
+	return fixture;
 }
 
-class FakeElement {
-	readonly children: FakeElement[] = [];
-	readonly listeners = new Map<string, Set<EventListener>>();
-	readonly attributes: Record<string, string> = {};
-	readonly classes = new Set<string>();
-	disabled = false;
-	text = '';
+function GivenLibraryItem(key: string): LibraryItem {
+	return { profile: 'personal', key, kind: 'pdf', status: 'used', notes: [] };
+}
 
-	get textContent(): string {
-		return this.text + this.children.map((child) => child.textContent).join('');
-	}
-	createEl(_tag: string, options?: { cls?: string; text?: string; attr?: Record<string, string> }): FakeElement {
-		const child = new FakeElement(options);
-		this.children.push(child);
-		return child;
-	}
-	createDiv(options?: { cls?: string; text?: string; attr?: Record<string, string> }): FakeElement {
-		return this.createEl('div', options);
-	}
-	createSpan(options?: { cls?: string; text?: string; attr?: Record<string, string> }): FakeElement {
-		return this.createEl('span', options);
-	}
-	addEventListener(type: string, callback: EventListener): void {
-		const callbacks = this.listeners.get(type) ?? new Set<EventListener>();
-		callbacks.add(callback);
-		this.listeners.set(type, callbacks);
-	}
-	removeEventListener(type: string, callback: EventListener): void {
-		this.listeners.get(type)?.delete(callback);
-	}
-	dispatch(type: string): void {
-		this.listeners.get(type)?.forEach((callback) => callback(new Event(type)));
-	}
-	findAttribute(name: string, value: string): FakeElement {
-		if (this.attributes[name] === value) return this;
-		for (const child of this.children) {
-			const found = child.findAttributeOrUndefined(name, value);
-			if (found !== undefined) return found;
-		}
-		throw new Error(`Could not find ${name}=${value}.`);
-	}
-	findClass(name: string): FakeElement {
-		if (this.classes.has(name)) return this;
-		for (const child of this.children) {
-			const found = child.findClassOrUndefined(name);
-			if (found !== undefined) return found;
-		}
-		throw new Error(`Could not find ${name}.`);
-	}
-	findClassOrUndefined(name: string): FakeElement | undefined {
-		if (this.classes.has(name)) return this;
-		for (const child of this.children) {
-			const found = child.findClassOrUndefined(name);
-			if (found !== undefined) return found;
-		}
-		return undefined;
-	}
-	findAttributeOrUndefined(name: string, value: string): FakeElement | undefined {
-		if (this.attributes[name] === value) return this;
-		for (const child of this.children) {
-			const found = child.findAttributeOrUndefined(name, value);
-			if (found !== undefined) return found;
-		}
-		return undefined;
-	}
-	empty(): void {
-		this.children.splice(0);
-		this.text = '';
-	}
-	setText(text: string): void {
-		this.empty();
-		this.text = text;
-	}
-	addClass(name: string): void {
-		this.classes.add(name);
-	}
-	removeClass(name: string): void {
-		this.classes.delete(name);
-	}
+function WhenClickingNext(lightbox: LibraryLightbox): void {
+	WhenClicking(find(lightbox.contentEl, '[aria-label="Next file"]'));
+}
 
-	constructor(options?: { cls?: string; text?: string; attr?: Record<string, string> }) {
-		if (options?.cls) this.classes.add(options.cls);
-		this.text = options?.text ?? '';
-		Object.assign(this.attributes, options?.attr ?? {});
-	}
+function WhenInserting(lightbox: LibraryLightbox): void {
+	WhenClicking(buttonNamed(lightbox.contentEl, 'Insert into note'));
+}
+
+function WhenPressing(lightbox: LibraryLightbox, key: string): void {
+	(lightbox.scope as unknown as Scope).press(key);
 }

@@ -1,151 +1,107 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import type { Depot } from '@/depot';
 import type { LibraryItem } from '@/library/library-item';
 import { LibraryGrid } from '@/ui/library/library-tile';
+import { find, findAll, WhenClicking } from '../../support/setup';
 
-vi.mock('obsidian', () => ({
-	Component: class Component {
-		children: Array<{ load: () => void; unload: () => void }> = [];
-		cleanups: Array<() => void> = [];
-		loaded = false;
-		addChild<T extends { load: () => void; unload: () => void }>(child: T): T {
-			this.children.push(child);
-			if (this.loaded) child.load();
-			return child;
-		}
-		removeChild<T extends { unload: () => void }>(child: T): T {
-			const component = child as unknown as { load: () => void; unload: () => void };
-			this.children = this.children.filter((candidate) => candidate !== component);
-			child.unload();
-			return child;
-		}
-		load(): void {
-			this.loaded = true;
-		}
-		unload(): void {
-			this.cleanups.splice(0).forEach((cleanup) => cleanup());
-			this.children.forEach((child) => child.unload());
-			(this as unknown as { onunload?: () => void }).onunload?.();
-			this.loaded = false;
-		}
-		register(cleanup: () => void): void {
-			this.cleanups.push(cleanup);
-		}
-		registerDomEvent(element: FakeElement, type: string, callback: EventListener): void {
-			element.addEventListener(type, callback);
-			this.register(() => element.removeEventListener(type, callback));
-		}
-	},
-	setIcon: () => {},
-}));
-afterEach(() => vi.unstubAllGlobals());
+it('selects a tile on click and opens it on double click', () => {
+	const fixture = GivenGrid(GivenItem('files/one.pdf'));
 
-it('owns tile listeners and the render observer for the current grid', () => {
-	const observers: FakeObserver[] = [];
+	WhenClicking(find(fixture.parent, '.depot-library-tile'));
+	WhenDoubleClicking(find(fixture.parent, '.depot-library-tile'));
+
+	expect(fixture.selected).toEqual(['files/one.pdf']);
+	expect(fixture.opened).toEqual(['files/one.pdf']);
+});
+
+it('stops reacting to tiles from a previous render', () => {
+	const fixture = GivenGrid(GivenItem('files/one.pdf'));
+	const staleTile = find(fixture.parent, '.depot-library-tile');
+	WhenRerendering(fixture, GivenItem('files/one.pdf'));
+
+	WhenClicking(staleTile);
+	WhenDoubleClicking(staleTile);
+
+	expect(fixture.selected).toEqual([]);
+	expect(fixture.opened).toEqual([]);
+	expect(findAll(fixture.parent, '.depot-library-tile')).toHaveLength(1);
+});
+
+it('marks only the selected tile', () => {
+	const one = GivenItem('one.pdf');
+	const two = GivenItem('two.pdf');
+	const fixture = GivenGrid(one, two);
+
+	fixture.grid.select(two);
+
+	expect(findAll(fixture.parent, '.depot-library-tile.is-selected').map((tile) => tile.title)).toEqual([
+		expect.stringContaining('two.pdf'),
+	]);
+});
+
+it('disconnects the image observer of each render and on unload', () => {
+	const observers = GivenIntersectionObservers();
+	const fixture = GivenGrid(GivenItem('one.pdf'));
+	WhenRerendering(fixture, GivenItem('one.pdf'));
+
+	fixture.grid.unload();
+
+	expect(observers.map((observer) => observer.disconnected)).toEqual([true, true]);
+});
+
+function GivenGrid(...items: LibraryItem[]) {
+	const parent = document.body.createDiv();
+	const selected: string[] = [];
+	const opened: string[] = [];
+	const grid = new LibraryGrid(
+		parent,
+		{} as unknown as Depot,
+		(item) => selected.push(item.key),
+		(item) => opened.push(item.key)
+	);
+	grid.load();
+	onTestFinished(() => grid.unload());
+	grid.render([GivenGroup(...items)], undefined);
+
+	return { grid, parent, selected, opened };
+}
+
+function GivenIntersectionObservers(): FakeIntersectionObserver[] {
+	const observers: FakeIntersectionObserver[] = [];
 	vi.stubGlobal(
 		'IntersectionObserver',
-		class extends FakeObserver {
-			constructor(callback: IntersectionObserverCallback) {
-				super(callback);
+		class extends FakeIntersectionObserver {
+			constructor() {
+				super();
 				observers.push(this);
 			}
 		}
 	);
-	const parent = new FakeElement();
-	const selected: string[] = [];
-	const opened: string[] = [];
-	const item: LibraryItem = { profile: 'personal', key: 'files/one.pdf', kind: 'pdf', status: 'used', notes: [] };
-	const grid = new LibraryGrid(
-		parent as unknown as HTMLElement,
-		{} as unknown as Depot,
-		(value) => selected.push(value.key),
-		(value) => opened.push(value.key)
-	);
-	grid.load();
-	grid.render([{ id: 'undated', label: 'Unknown date', items: [item] }], undefined);
-	const firstTile = parent.findClass('depot-library-tile');
-	firstTile.dispatch('click');
-	grid.select(item);
-	grid.render([{ id: 'undated', label: 'Unknown date', items: [item] }], undefined);
-	firstTile.dispatch('dblclick');
 
-	expect(selected).toEqual(['files/one.pdf']);
-	expect(opened).toEqual([]);
-	expect(observers[0]?.disconnected).toBe(true);
-	expect(observers).toHaveLength(2);
+	return observers;
+}
 
-	grid.unload();
-	expect(observers[1]?.disconnected).toBe(true);
-});
+function GivenItem(key: string): LibraryItem {
+	return { profile: 'personal', key, kind: 'pdf', status: 'used', notes: [] };
+}
 
-class FakeObserver {
+function GivenGroup(...items: LibraryItem[]) {
+	return { id: 'undated', label: 'Unknown date', items };
+}
+
+function WhenRerendering(fixture: ReturnType<typeof GivenGrid>, ...items: LibraryItem[]): void {
+	fixture.grid.render([GivenGroup(...items)], undefined);
+}
+
+function WhenDoubleClicking(element: Element): void {
+	element.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+}
+
+class FakeIntersectionObserver {
 	disconnected = false;
-	constructor(readonly callback: IntersectionObserverCallback) {}
 	observe(): void {}
 	unobserve(): void {}
 	disconnect(): void {
 		this.disconnected = true;
-	}
-}
-
-class FakeElement {
-	readonly children: FakeElement[] = [];
-	readonly listeners = new Map<string, Set<EventListener>>();
-	readonly classes = new Set<string>();
-	textContent = '';
-
-	createEl(_tag: string, options?: { cls?: string; text?: string }): FakeElement {
-		return this.append(new FakeElement(options?.cls, options?.text));
-	}
-	createDiv(options?: { cls?: string; text?: string }): FakeElement {
-		return this.append(new FakeElement(options?.cls, options?.text));
-	}
-	createSpan(options?: { cls?: string; text?: string }): FakeElement {
-		return this.append(new FakeElement(options?.cls, options?.text));
-	}
-	addEventListener(type: string, callback: EventListener): void {
-		const callbacks = this.listeners.get(type) ?? new Set<EventListener>();
-		callbacks.add(callback);
-		this.listeners.set(type, callbacks);
-	}
-	removeEventListener(type: string, callback: EventListener): void {
-		this.listeners.get(type)?.delete(callback);
-	}
-	dispatch(type: string): void {
-		this.listeners.get(type)?.forEach((callback) => callback(new Event(type)));
-	}
-	toggleClass(name: string, enabled: boolean): void {
-		if (enabled) this.classes.add(name);
-		else this.classes.delete(name);
-	}
-	addClass(name: string): void {
-		this.classes.add(name);
-	}
-	findClass(name: string): FakeElement {
-		if (this.classes.has(name)) return this;
-		for (const child of this.children) {
-			const found = child.findClassOrUndefined(name);
-			if (found !== undefined) return found;
-		}
-		throw new Error(`Could not find ${name}.`);
-	}
-	empty(): void {
-		this.children.splice(0);
-	}
-	findClassOrUndefined(name: string): FakeElement | undefined {
-		if (this.classes.has(name)) return this;
-		for (const child of this.children) {
-			const found = child.findClassOrUndefined(name);
-			if (found !== undefined) return found;
-		}
-		return undefined;
-	}
-	private append(child: FakeElement): FakeElement {
-		this.children.push(child);
-		return child;
-	}
-	constructor(className?: string, text?: string) {
-		if (className) this.classes.add(className);
-		this.textContent = text ?? '';
 	}
 }
