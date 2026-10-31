@@ -3,7 +3,8 @@
 	"name": "Depot",
 	"version": "0.1.0",
 	"minAppVersion": "1.13.0",
-	"description": "S3-compatible attachment storage with private buckets and persistent references.",
+	"description": "Store attachments in private S3-compatible buckets and link them with references that never expire.",
 	"author": "mathcrln",
+	"authorUrl": "https://github.com/mathcrln",
 	"isDesktopOnly": false
 }

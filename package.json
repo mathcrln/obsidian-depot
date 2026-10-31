@@ -2,7 +2,7 @@
 	"name": "depot",
 	"version": "0.1.0",
 	"private": true,
-	"description": "S3-compatible attachment storage with private buckets and persistent references.",
+	"description": "Store attachments in private S3-compatible buckets and link them with references that never expire.",
 	"keywords": [],
 	"license": "0-BSD",
 	"author": "Mathieu Céraline <oss@mathcrln.com>",
